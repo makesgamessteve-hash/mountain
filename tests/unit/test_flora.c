@@ -191,12 +191,14 @@ static void test_habitat(void) {
     m.moist_min = 0.8f;
     CHECK_NEAR(mtn_flora_habitat(&m, &t, x, z), 0.0f, 1e-6);
 
-    /* close to the trail: trees keep 3 m clear, ground cover only 0.8 m */
-    for (int i = 0; i < 33 * 33; i++) t.trail_dist[i] = 2.0f;
+    /* close to the trail: trees keep 5 m clear, ground cover stays off the 2.4 m path */
+    for (int i = 0; i < 33 * 33; i++) t.trail_dist[i] = 4.5f;
     CHECK_NEAR(mtn_flora_habitat(&s, &t, x, z), 0.0f, 1e-6);
     mtn_plant_species g = s;
     g.kind = MTN_PLANT_GROUND;
     CHECK(mtn_flora_habitat(&g, &t, x, z) > 0.3f);
+    for (int i = 0; i < 33 * 33; i++) t.trail_dist[i] = 1.0f;
+    CHECK_NEAR(mtn_flora_habitat(&g, &t, x, z), 0.0f, 1e-6);
     for (int i = 0; i < 33 * 33; i++) t.trail_dist[i] = 1000.0f;
 
     /* lakes are never habitat */

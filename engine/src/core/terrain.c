@@ -480,7 +480,10 @@ static const int NB16Z[16] = {0, 0, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 2, 2, -2,
 static void stamp_trail_distance(mtn_terrain *t) {
     int n = t->n;
     const float cap = 40.0f;
-    for (int i = 0; i < n * n; i++) t->trail_dist[i] = cap;
+    for (int i = 0; i < n * n; i++) {
+        t->trail_dist[i] = cap;
+        t->trail_near[i] = -1;
+    }
     int rad = (int)ceilf(cap / t->cell);
     for (int k = 0; k < t->trail_len; k++) {
         vec3 p = t->trail[k];
@@ -489,77 +492,307 @@ static void stamp_trail_distance(mtn_terrain *t) {
             for (int x = cx - rad; x <= cx + rad; x++) {
                 if (x < 0 || z < 0 || x >= n || z >= n) continue;
                 float d = v3_dist_xz(p, v3((float)x * t->cell, 0, (float)z * t->cell));
-                if (d < t->trail_dist[z * n + x]) t->trail_dist[z * n + x] = d;
+                if (d < t->trail_dist[z * n + x]) {
+                    t->trail_dist[z * n + x] = d;
+                    t->trail_near[z * n + x] = k;
+                }
             }
     }
 }
 
-int mtn_terrain_find_trail(mtn_terrain *t) {
-    /* A* on a half-resolution grid with 16 neighbours (allows switchbacks). */
-    int step = t->n > 300 ? 2 : 1;
-    int m = (t->n - 1) / step + 1;
-    float cs = t->cell * (float)step;
-    size_t mm = (size_t)m * (size_t)m;
-    float *g = malloc(sizeof(float) * mm);
-    int *from = malloc(sizeof(int) * mm);
-    uint8_t *closed = calloc(mm, 1);
-    heap hp = {0};
-    for (size_t i = 0; i < mm; i++) {
-        g[i] = 1e30f;
-        from[i] = -1;
+int mtn_terrain_trail_nearest(const mtn_terrain *t, float x, float z, vec3 *closest) {
+    if (!t->trail_near || t->trail_len < 2) return 0;
+    int gx = (int)floorf(x / t->cell), gz = (int)floorf(z / t->cell);
+    float best = 1e30f;
+    vec3 q = v3(x, 0, z);
+    int found = 0;
+    for (int c = 0; c < 4; c++) {
+        int cx = gx + (c & 1), cz = gz + (c >> 1);
+        if (cx < 0 || cz < 0 || cx >= t->n || cz >= t->n) continue;
+        int k0 = t->trail_near[cz * t->n + cx];
+        if (k0 < 0) continue;
+        for (int k = k0 - 6; k <= k0 + 6; k++) {
+            if (k < 0 || k + 1 >= t->trail_len) continue;
+            vec3 a = t->trail[k], b = t->trail[k + 1];
+            vec3 ab = v3(b.x - a.x, 0, b.z - a.z);
+            float l2 = ab.x * ab.x + ab.z * ab.z;
+            float f = l2 > 1e-8f ? mtn_clampf(((x - a.x) * ab.x + (z - a.z) * ab.z) / l2, 0.0f, 1.0f) : 0.0f;
+            vec3 p = v3_lerp(a, b, f);
+            float d = v3_dist_xz(p, q);
+            if (d < best) {
+                best = d;
+                *closest = p;
+                found = 1;
+            }
+        }
     }
-    int sx = mtn_clampi((int)(t->trailhead.x / cs + 0.5f), 0, m - 1);
-    int sz = mtn_clampi((int)(t->trailhead.z / cs + 0.5f), 0, m - 1);
-    int gx = mtn_clampi((int)(t->summit.x / cs + 0.5f), 0, m - 1);
-    int gz = mtn_clampi((int)(t->summit.z / cs + 0.5f), 0, m - 1);
-    int start = sz * m + sx, goal = gz * m + gx;
-    g[start] = 0.0f;
+    return found;
+}
+
+int mtn_terrain_trail_surface(const mtn_terrain *t, float x, float z, float *y) {
+    vec3 c;
+    if (!mtn_terrain_trail_nearest(t, x, z, &c) || v3_dist_xz(c, v3(x, 0, z)) > MTN_TRAIL_WIDTH * 0.5f) return 0;
+    *y = c.y;
+    return 1;
+}
+
+/* One leg of the trail: A* on the full grid with 16 neighbours. Steep grades are
+ * expensive (so the route zigzags), a smooth noise field makes it meander, water
+ * and leaving the playable area are avoided. Appends grid indices after start. */
+typedef struct {
+    float *g;
+    int *from;
+    uint8_t *closed;
+    int *path;
+    int len, cap;
+} trail_work;
+
+static float meander(const mtn_terrain *t, float x, float z) {
+    return 0.8f + 0.5f * (mtn_fbm2(x * 0.006f, z * 0.006f, t->p.seed * 17u + 5u, 3, 2.0f, 0.5f) * 0.5f + 0.5f);
+}
+
+static int route_leg(const mtn_terrain *t, trail_work *w, int start, int goal) {
+    int n = t->n;
+    size_t nn = (size_t)n * (size_t)n;
+    for (size_t i = 0; i < nn; i++) {
+        w->g[i] = 1e30f;
+        w->from[i] = -1;
+    }
+    memset(w->closed, 0, nn);
+    heap hp = {0};
+    int gx = goal % n, gz = goal / n;
+    w->g[start] = 0.0f;
     heap_push(&hp, 0.0f, start);
     while (hp.n > 0) {
         heap_item c = heap_pop(&hp);
-        if (closed[c.i]) continue;
-        closed[c.i] = 1;
+        if (w->closed[c.i]) continue;
+        w->closed[c.i] = 1;
         if (c.i == goal) break;
-        int cx = c.i % m, cz = c.i / m;
-        float ch = mtn_terrain_grid(t, cx * step, cz * step);
+        int cx = c.i % n, cz = c.i / n;
+        float ch = t->h[c.i];
         for (int k = 0; k < 16; k++) {
             int x = cx + NB16X[k], z = cz + NB16Z[k];
-            if (x < 0 || z < 0 || x >= m || z >= m) continue;
-            int j = z * m + x;
-            if (closed[j]) continue;
-            float wx = (float)x * cs, wz = (float)z * cs;
-            float nh = mtn_terrain_grid(t, x * step, z * step);
-            float dist = cs * sqrtf((float)(NB16X[k] * NB16X[k] + NB16Z[k] * NB16Z[k]));
-            float grade = fabsf(nh - ch) / dist;
-            float cost = dist * (1.0f + 28.0f * grade * grade);
-            if (grade > 0.75f) cost *= 40.0f;
-            if (t->water[(z * step) * t->n + x * step] != MTN_NO_WATER) cost *= 60.0f;
+            if (x < 0 || z < 0 || x >= n || z >= n) continue;
+            int j = z * n + x;
+            if (w->closed[j]) continue;
+            float wx = (float)x * t->cell, wz = (float)z * t->cell;
+            float dist = t->cell * sqrtf((float)(NB16X[k] * NB16X[k] + NB16Z[k] * NB16Z[k]));
+            float grade = fabsf(t->h[j] - ch) / dist;
+            float cost = dist * meander(t, wx, wz) * (1.0f + 2.0f * grade * grade);
+            if (grade > 0.25f) cost *= 1.0f + 80.0f * (grade - 0.25f);
+            if (grade > 0.38f) cost *= 40.0f;
+            if (t->water[j] != MTN_NO_WATER) cost *= 80.0f;
             if (!mtn_terrain_in_playable(t, wx, wz)) cost *= 20.0f;
-            float ng = g[c.i] + cost;
-            if (ng < g[j]) {
-                g[j] = ng;
-                from[j] = c.i;
-                float dxg = (float)(x - gx) * cs, dzg = (float)(z - gz) * cs;
-                heap_push(&hp, ng + sqrtf(dxg * dxg + dzg * dzg), j);
+            if (t->biome[j] == MTN_BIOME_ROCK) cost *= 1.5f;
+            float ng = w->g[c.i] + cost;
+            if (ng < w->g[j]) {
+                w->g[j] = ng;
+                w->from[j] = c.i;
+                float dxg = (float)(x - gx) * t->cell, dzg = (float)(z - gz) * t->cell;
+                heap_push(&hp, ng + 0.7f * sqrtf(dxg * dxg + dzg * dzg), j);
             }
         }
     }
     free(hp.a);
-    /* reconstruct */
+    if (start != goal && w->from[goal] < 0) return 0;
     int count = 0;
-    for (int c = goal; c >= 0; c = from[c]) count++;
-    int ok = from[goal] >= 0 || goal == start;
-    vec3 *raw = malloc(sizeof(vec3) * (size_t)(count > 0 ? count : 1));
-    int k = count;
-    for (int c = goal; c >= 0; c = from[c]) {
-        k--;
-        raw[k] = v3((float)(c % m) * cs, 0, (float)(c / m) * cs);
+    for (int c = goal; c != start && c >= 0; c = w->from[c]) count++;
+    if (w->len + count > w->cap) {
+        w->cap = (w->len + count) * 2 + 64;
+        w->path = realloc(w->path, sizeof(int) * (size_t)w->cap);
     }
-    free(g);
-    free(from);
-    free(closed);
-    /* Chaikin smoothing (2 passes) */
-    for (int pass = 0; pass < 2 && count > 2; pass++) {
+    int k = w->len + count;
+    for (int c = goal; c != start && c >= 0; c = w->from[c]) w->path[--k] = c;
+    w->len += count;
+    return 1;
+}
+
+/* A waypoint on the ring at a given altitude fraction, near the requested angle around the summit. */
+static int find_waypoint(const mtn_terrain *t, float angle, float level, int *out) {
+    static const float tries[5] = {0.0f, 0.25f, -0.25f, 0.5f, -0.5f};
+    float rmax = t->p.playable_radius * t->world_size * 0.5f;
+    for (int k = 0; k < 5; k++) {
+        float a = angle + tries[k];
+        for (float r = t->cell * 2.0f; r < rmax; r += t->cell) {
+            float x = t->summit.x + cosf(a) * r, z = t->summit.z + sinf(a) * r;
+            if (!mtn_terrain_in_playable(t, x, z)) break;
+            if (mtn_terrain_altitude_frac(t, mtn_terrain_height(t, x, z)) > level) continue;
+            if (mtn_terrain_water(t, x, z) != MTN_NO_WATER || mtn_terrain_slope(t, x, z) > 0.3f) continue;
+            int gx = mtn_clampi((int)lroundf(x / t->cell), 0, t->n - 1), gz = mtn_clampi((int)lroundf(z / t->cell), 0, t->n - 1);
+            *out = gz * t->n + gx;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void place_markers(mtn_terrain *t) {
+    /* a cairn at the trailhead, one every 80 m beside the path and one on the summit;
+     * painted trail posts every 40 m on alternating sides */
+    free(t->cairns);
+    free(t->posts);
+    t->cairns = malloc(sizeof(vec3) * (size_t)(t->trail_len / 40 + 3));
+    t->posts = malloc(sizeof(vec3) * (size_t)(t->trail_len / 20 + 2));
+    t->cairn_count = 0;
+    t->post_count = 0;
+    for (int i = 0; i < t->trail_len; i += 20) {
+        vec3 a = t->trail[i > 0 ? i - 1 : 0], b = t->trail[i + 1 < t->trail_len ? i + 1 : i];
+        vec3 dir = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
+        if (v3_len(dir) < 0.5f) dir = v3(1, 0, 0);
+        vec3 side = v3(-dir.z, 0, dir.x);
+        if (i % 40 == 0 && i + 1 < t->trail_len) {
+            float sgn = (i / 40) % 2 ? 1.0f : -1.0f;
+            vec3 c = v3_add(t->trail[i], v3_scale(side, 2.1f * sgn));
+            c.y = mtn_terrain_height(t, c.x, c.z);
+            t->cairns[t->cairn_count++] = c;
+        }
+        if (i > 0 && i % 20 == 0 && i % 40 != 0) {
+            float sgn = (i / 20) % 4 == 1 ? 1.0f : -1.0f;
+            vec3 c = v3_add(t->trail[i], v3_scale(side, 1.7f * sgn));
+            c.y = mtn_terrain_height(t, c.x, c.z);
+            t->posts[t->post_count++] = c;
+        }
+    }
+    vec3 top = t->summit;
+    top.x += 2.0f;
+    top.y = mtn_terrain_height(t, top.x, top.z);
+    t->cairns[t->cairn_count++] = top;
+    /* signpost at the trailhead, on the other side of the cairn */
+    if (t->trail_len > 2) {
+        vec3 a = t->trail[0], b = t->trail[2];
+        vec3 dir = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
+        t->signpost = v3_add(a, v3(dir.z * 2.0f, 0, -dir.x * 2.0f));
+        t->signpost.y = mtn_terrain_height(t, t->signpost.x, t->signpost.z);
+        t->signpost_yaw = atan2f(dir.x, -dir.z);
+    }
+}
+
+/* Grade the terrain along the path: level across its width, never above the path. */
+static void flatten_along_trail(mtn_terrain *t) {
+    int n = t->n;
+    size_t nn = (size_t)n * (size_t)n;
+    const float r_flat = 8.0f, r_blend = 16.0f;
+    float *best = malloc(sizeof(float) * nn);
+    int *near = malloc(sizeof(int) * nn);
+    for (size_t i = 0; i < nn; i++) {
+        best[i] = 1e30f;
+        near[i] = -1;
+    }
+    int rad = (int)ceilf(r_blend / t->cell);
+    for (int k = 0; k < t->trail_len; k++) {
+        vec3 p = t->trail[k];
+        int cx = (int)lroundf(p.x / t->cell), cz = (int)lroundf(p.z / t->cell);
+        for (int z = cz - rad; z <= cz + rad; z++)
+            for (int x = cx - rad; x <= cx + rad; x++) {
+                if (x < 0 || z < 0 || x >= n || z >= n) continue;
+                float d = v3_dist_xz(p, v3((float)x * t->cell, 0, (float)z * t->cell));
+                int i = z * n + x;
+                if (d < best[i]) {
+                    best[i] = d;
+                    near[i] = k;
+                }
+            }
+    }
+    for (size_t i = 0; i < nn; i++) {
+        if (best[i] > r_blend) continue;
+        float w = 1.0f - mtn_smoothstep(r_flat, r_blend, best[i]);
+        t->h[i] = mtn_lerpf(t->h[i], t->trail[near[i]].y - 0.08f, w);
+    }
+    /* the bilinear terrain must stay below the path surface under the whole strip
+     * (only grid points belonging to this stretch of the path are lowered, so the
+     * legs of a switchback do not cut into each other) */
+    for (int pass = 0; pass < 3; pass++)
+        for (int k = 0; k + 1 < t->trail_len; k++) {
+            vec3 a = t->trail[k], b = t->trail[k + 1];
+            vec3 d = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
+            vec3 side = v3(-d.z, 0, d.x);
+            for (int s = -2; s <= 2; s++) {
+                vec3 q = v3_add(a, v3_scale(side, 0.7f * (float)s));
+                if (mtn_terrain_height(t, q.x, q.z) <= a.y - 0.03f) continue;
+                int gx = (int)floorf(q.x / t->cell), gz = (int)floorf(q.z / t->cell);
+                for (int c = 0; c < 4; c++) {
+                    int x = mtn_clampi(gx + (c & 1), 0, n - 1), z = mtn_clampi(gz + (c >> 1), 0, n - 1);
+                    int i = z * n + x;
+                    if (t->h[i] > a.y - 0.08f) t->h[i] = a.y - 0.08f;
+                }
+            }
+        }
+    free(best);
+    free(near);
+}
+
+/* Can the walker go straight from a to b? Gentle enough, no deep cut or fill, no water. */
+static int straight_ok(const mtn_terrain *t, vec3 a, vec3 b) {
+    float d = v3_dist_xz(a, b);
+    if (d > 54.0f) return 0;
+    float ha = mtn_terrain_height(t, a.x, a.z), hb = mtn_terrain_height(t, b.x, b.z);
+    if (fabsf(hb - ha) > 0.27f * d) return 0;
+    int steps = (int)(d / 2.0f) + 1;
+    for (int s = 1; s < steps; s++) {
+        float f = (float)s / (float)steps;
+        float x = mtn_lerpf(a.x, b.x, f), z = mtn_lerpf(a.z, b.z, f);
+        if (fabsf(mtn_terrain_height(t, x, z) - mtn_lerpf(ha, hb, f)) > 2.0f) return 0;
+        if (mtn_terrain_water(t, x, z) != MTN_NO_WATER || !mtn_terrain_in_playable(t, x, z)) return 0;
+    }
+    return 1;
+}
+
+/* Replace grid staircases by straight runs where walking straight is fine. */
+static int string_pull(const mtn_terrain *t, vec3 *pts, int count) {
+    int o = 0, i = 0;
+    while (i < count - 1) {
+        pts[o++] = pts[i];
+        int best = i + 1;
+        for (int j = i + 2; j < count && j <= i + 12; j++)
+            if (straight_ok(t, pts[i], pts[j])) best = j;
+        i = best;
+    }
+    pts[o++] = pts[count - 1];
+    return o;
+}
+
+int mtn_terrain_find_trail(mtn_terrain *t) {
+    int n = t->n;
+    size_t nn = (size_t)n * (size_t)n;
+    trail_work w = {0};
+    w.g = malloc(sizeof(float) * nn);
+    w.from = malloc(sizeof(int) * nn);
+    w.closed = malloc(nn);
+    int start = mtn_clampi((int)lroundf(t->trailhead.z / t->cell), 0, n - 1) * n +
+                mtn_clampi((int)lroundf(t->trailhead.x / t->cell), 0, n - 1);
+    int goal = mtn_clampi((int)lroundf(t->summit.z / t->cell), 0, n - 1) * n +
+               mtn_clampi((int)lroundf(t->summit.x / t->cell), 0, n - 1);
+    /* waypoints spiral up the mountain at rising altitude */
+    int stops[6], ns = 0;
+    float a0 = atan2f(t->trailhead.z - t->summit.z, t->trailhead.x - t->summit.x);
+    float dir = (t->p.seed & 1u) ? 1.0f : -1.0f;
+    float start_level = mtn_terrain_altitude_frac(t, t->trailhead.y);
+    static const float levels[2] = {0.30f, 0.62f};
+    for (int k = 0; k < 2; k++) {
+        if (levels[k] <= start_level + 0.05f) continue;
+        int wp;
+        if (find_waypoint(t, a0 + dir * (float)(k + 1) * 0.6f, levels[k], &wp)) stops[ns++] = wp;
+    }
+    stops[ns++] = goal;
+    w.cap = 1024;
+    w.path = malloc(sizeof(int) * (size_t)w.cap);
+    w.path[w.len++] = start;
+    int ok = 1, from = start;
+    for (int k = 0; k < ns; k++) {
+        if (route_leg(t, &w, from, stops[k])) from = stops[k];
+        else ok = 0;
+    }
+    if (from != goal) ok = route_leg(t, &w, from, goal) && ok;
+    free(w.g);
+    free(w.from);
+    free(w.closed);
+    int count = w.len;
+    vec3 *raw = malloc(sizeof(vec3) * (size_t)count);
+    for (int i = 0; i < count; i++) raw[i] = v3((float)(w.path[i] % n) * t->cell, 0, (float)(w.path[i] / n) * t->cell);
+    free(w.path);
+    count = string_pull(t, raw, count);
+    /* Chaikin smoothing (3 passes) */
+    for (int pass = 0; pass < 3 && count > 2; pass++) {
         int nc = 2 * (count - 1) + 2;
         vec3 *sm = malloc(sizeof(vec3) * (size_t)nc);
         int o = 0;
@@ -592,36 +825,85 @@ int mtn_terrain_find_trail(mtn_terrain *t) {
         }
         acc += seg;
     }
-    if (t->trail_len == 0 && count > 0) {
+    if (t->trail_len == 0) {
         vec3 p = raw[0];
         p.y = mtn_terrain_height(t, p.x, p.z);
         t->trail[t->trail_len++] = p;
     }
     free(raw);
-    /* a cairn at the trailhead, one every 80 m beside the path and one on the summit */
-    free(t->cairns);
-    t->cairns = malloc(sizeof(vec3) * (size_t)(t->trail_len / 40 + 3));
-    t->cairn_count = 0;
-    if (t->trail_len > 2) {
-        vec3 a = t->trail[0], b = t->trail[2];
-        vec3 dir = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
-        vec3 c = v3_add(a, v3(-dir.z * 1.8f, 0, dir.x * 1.8f));
-        c.y = mtn_terrain_height(t, c.x, c.z);
-        t->cairns[t->cairn_count++] = c;
+    /* cut out small loops where the path comes back to itself */
+    int kept = 0;
+    for (int i = 0; i < t->trail_len; i++) {
+        t->trail[kept++] = t->trail[i];
+        for (int j = mtn_clampi(i + 40, 0, t->trail_len - 1); j > i + 4; j--)
+            if (v3_dist_xz(t->trail[i], t->trail[j]) < 3.0f) {
+                i = j - 1;
+                break;
+            }
     }
-    for (int i = 40; i < t->trail_len - 1; i += 40) {
-        vec3 a = t->trail[i - 1], b = t->trail[i + 1];
-        vec3 dir = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
-        vec3 side = v3(-dir.z, 0, dir.x);
-        float sgn = (i / 40) % 2 ? 1.0f : -1.0f;
-        vec3 c = v3_add(t->trail[i], v3_scale(side, 1.8f * sgn));
-        c.y = mtn_terrain_height(t, c.x, c.z);
-        t->cairns[t->cairn_count++] = c;
+    t->trail_len = kept;
+    /* walk straight up the last metres instead of circling the summit cone */
+    if (ok && t->trail_len > 1) {
+        int i = 0;
+        while (i < t->trail_len - 1 && v3_dist_xz(t->trail[i], t->summit) > 12.0f) i++;
+        vec3 a = t->trail[i];
+        float d = v3_dist_xz(a, t->summit);
+        int steps = (int)ceilf(d / 2.0f);
+        t->trail_len = i + 1;
+        for (int k = 1; k <= steps && t->trail_len < samples; k++) {
+            vec3 q = v3_lerp(a, t->summit, (float)k / (float)steps);
+            q.y = mtn_terrain_height(t, q.x, q.z);
+            t->trail[t->trail_len++] = q;
+        }
     }
-    vec3 top = t->summit;
-    top.x += 2.0f;
-    top.y = mtn_terrain_height(t, top.x, top.z);
-    t->cairns[t->cairn_count++] = top;
+    /* smooth the height profile over about 40 m so the path has no bumps */
+    int tl = t->trail_len;
+    float *ys = malloc(sizeof(float) * (size_t)tl), *lo = malloc(sizeof(float) * (size_t)tl),
+          *hi = malloc(sizeof(float) * (size_t)tl), *s_at = malloc(sizeof(float) * (size_t)tl);
+    for (int i = 0; i < tl; i++) {
+        float sum = 0.0f;
+        int c = 0;
+        int win = mtn_clampi(tl - 1 - i, 0, mtn_clampi(i, 0, 10));
+        for (int k = i - win; k <= i + win; k++) {
+            sum += t->trail[k].y;
+            c++;
+        }
+        ys[i] = sum / (float)c;
+        s_at[i] = i > 0 ? s_at[i - 1] + v3_dist_xz(t->trail[i - 1], t->trail[i]) : 0.0f;
+    }
+    /* limit the grade: the largest grade-limited profile below and the smallest above the
+     * terrain profile, averaged; the terrain is then cut or filled to it */
+    for (int i = 0; i < tl; i++) lo[i] = hi[i] = ys[i];
+    for (int i = 1; i < tl; i++) {
+        float ds = (s_at[i] - s_at[i - 1]) * MTN_TRAIL_MAX_GRADE;
+        lo[i] = fminf(lo[i], lo[i - 1] + ds);
+        hi[i] = fmaxf(hi[i], hi[i - 1] - ds);
+    }
+    for (int i = tl - 2; i >= 0; i--) {
+        float ds = (s_at[i + 1] - s_at[i]) * MTN_TRAIL_MAX_GRADE;
+        lo[i] = fminf(lo[i], lo[i + 1] + ds);
+        hi[i] = fmaxf(hi[i], hi[i + 1] - ds);
+    }
+    /* both ends stay at the terrain height (the summit is not cut down) when the
+     * length allows it: keep the profile inside the cones of the two end points */
+    float y0 = ys[0], y1 = ys[tl - 1], len = s_at[tl - 1];
+    int pin = fabsf(y1 - y0) <= len * MTN_TRAIL_MAX_GRADE;
+    for (int i = 0; i < tl; i++) {
+        float p = 0.5f * (lo[i] + hi[i]);
+        if (pin) {
+            float a = s_at[i] * MTN_TRAIL_MAX_GRADE, b = (len - s_at[i]) * MTN_TRAIL_MAX_GRADE;
+            p = mtn_clampf(p, fmaxf(y0 - a, y1 - b), fminf(y0 + a, y1 + b));
+        }
+        t->trail[i].y = p;
+    }
+    free(ys);
+    free(lo);
+    free(hi);
+    free(s_at);
+    flatten_along_trail(t);
+    t->summit.y = mtn_terrain_height(t, t->summit.x, t->summit.z);
+    t->trailhead.y = mtn_terrain_height(t, t->trailhead.x, t->trailhead.z);
+    place_markers(t);
     stamp_trail_distance(t);
     return ok;
 }
@@ -745,6 +1027,7 @@ int mtn_terrain_generate(mtn_terrain *t, const mtn_terrain_params *p) {
     t->water = malloc(sizeof(float) * nn);
     t->moist = malloc(sizeof(float) * nn);
     t->trail_dist = malloc(sizeof(float) * nn);
+    t->trail_near = malloc(sizeof(int) * nn);
     t->biome = malloc(nn);
     generate_shape(t);
     mtn_terrain_erode(t->h, t->n, t->cell, p->erosion_drops, p->seed);
@@ -778,6 +1061,7 @@ uint32_t mtn_terrain_checksum(const mtn_terrain *t) {
     }
     for (int i = 0; i < t->trail_len; i++) h = fnv(fnv(h, cm(t->trail[i].x)), cm(t->trail[i].z));
     for (int i = 0; i < t->cairn_count; i++) h = fnv(fnv(h, cm(t->cairns[i].x)), cm(t->cairns[i].z));
+    for (int i = 0; i < t->post_count; i++) h = fnv(fnv(h, cm(t->posts[i].x)), cm(t->posts[i].z));
     for (int i = 0; i < t->vp_count; i++) h = fnv(fnv(h, cm(t->vps[i].pos.x)), cm(t->vps[i].yaw));
     return h;
 }
@@ -787,8 +1071,10 @@ void mtn_terrain_free(mtn_terrain *t) {
     free(t->water);
     free(t->moist);
     free(t->trail_dist);
+    free(t->trail_near);
     free(t->biome);
     free(t->trail);
     free(t->cairns);
+    free(t->posts);
     memset(t, 0, sizeof *t);
 }

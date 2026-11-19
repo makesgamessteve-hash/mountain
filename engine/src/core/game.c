@@ -116,7 +116,7 @@ void mtn_game_teleport_trailhead(mtn_game *g) {
         yaw = atan2f(b.x - a.x, -(b.z - a.z));
         p = a;
     }
-    p.y = mtn_terrain_height(&g->terrain, p.x, p.z);
+    p.y = fmaxf(mtn_terrain_height(&g->terrain, p.x, p.z), p.y);
     mtn_player prev = g->player;
     mtn_player_init(&g->player, p, yaw);
     g->player.walk_speed = prev.walk_speed > 0 ? prev.walk_speed : g->player.walk_speed;
@@ -174,6 +174,11 @@ static float world_ground(void *ctx, float x, float z, vec3 *n, int *surface) {
     float w = mtn_terrain_water(&g->terrain, x, z);
     if (w != MTN_NO_WATER && w > h + 0.05f) *surface = MTN_SURF_WATER;
     float hs;
+    if (mtn_terrain_trail_surface(&g->terrain, x, z, &hs) && hs > h && hs <= g->player.pos.y + 0.75f) {
+        h = hs; /* the built-up path is level across */
+        *n = v3(0, 1, 0);
+        *surface = MTN_SURF_ROCK;
+    }
     if (mtn_house_surface(&g->house, x, z, &hs) && hs > h - 0.05f && hs <= g->player.pos.y + 0.75f) {
         h = hs;
         *n = v3(0, 1, 0);
@@ -187,6 +192,17 @@ static int world_push(void *ctx, vec3 *pos, float radius, float height) {
     (void)height;
     int hit = mtn_flora_collide(&g->flora, pos, radius);
     hit |= mtn_house_collide(&g->house, pos, radius);
+    { /* the retaining wall of a built-up stretch of path is solid from below */
+        vec3 c;
+        if (mtn_terrain_trail_nearest(&g->terrain, pos->x, pos->z, &c) && c.y > pos->y + 0.75f) {
+            float d = v3_dist_xz(c, *pos), min_d = MTN_TRAIL_WIDTH * 0.5f + radius;
+            if (d < min_d && d > 1e-4f) {
+                pos->x = c.x + (pos->x - c.x) / d * min_d;
+                pos->z = c.z + (pos->z - c.z) / d * min_d;
+                hit = 1;
+            }
+        }
+    }
     for (int i = 0; i < g->terrain.cairn_count; i++) { /* cairns are solid */
         vec3 c = g->terrain.cairns[i];
         float d = v3_dist_xz(*pos, c), min_d = 0.55f + radius;

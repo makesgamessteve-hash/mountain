@@ -160,7 +160,7 @@ static void test_house_flow(void) {
     /* stand in front of the door, facing it */
     vec3 door = mtn_house_door_world(&g->house);
     vec3 f = g->house.front;
-    g->player.pos = v3_add(door, v3_scale(f, 1.6f));
+    g->player.pos = v3_add(door, v3_scale(f, 1.0f)); /* on the porch or platform */
     g->player.pos.y = g->house.floor_y;
     g->player.yaw = atan2f(-f.x, f.z);
     g->player.pitch = 0.0f;

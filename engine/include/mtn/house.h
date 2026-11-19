@@ -13,6 +13,9 @@
 #define MTN_DOOR_WIDTH 1.1f
 #define MTN_DOOR_HEIGHT 2.1f
 #define MTN_HOUSE_UNSUMMON_DIST 25.0f
+#define MTN_STAIR_GRADE 0.7f      /* rise per metre of run */
+#define MTN_STAIR_MAX_RUN 16.0f
+#define MTN_STAIR_LAST_STEP 0.25f /* the last step is at most this high above dry ground */
 
 typedef enum { MTN_HOUSE_NONE = 0, MTN_HOUSE_APPEARING, MTN_HOUSE_PRESENT, MTN_HOUSE_VANISHING } mtn_house_state;
 typedef enum { MTN_HV_COTTAGE = 0, MTN_HV_HILLSIDE, MTN_HV_TREE, MTN_HV_STILTS, MTN_HV_COUNT } mtn_house_variant;
@@ -25,6 +28,8 @@ typedef struct {
     float ground_min, ground_max;
     int tree;        /* plant index for the tree house */
     float water_level;
+    int stair_side;  /* 0 front, 1 back, 2 right, 3 left */
+    float stair_len; /* horizontal run of the stairs, 0 = none */
     char reason[64];
 } mtn_house_site;
 
@@ -77,6 +82,8 @@ typedef struct {
     vec3 front, right;
     float floor_y, ground_min, water_level;
     int tree;
+    int stair_side;      /* side of the porch/platform the stairs leave from */
+    float stair_len;     /* horizontal run; the last step is on reachable ground */
     mat4 frame, inv_frame;
     float width, depth, wall_h;
     float door_angle;    /* radians, 0 closed */
@@ -96,6 +103,10 @@ int mtn_room_add_item(mtn_room_type *t, const char *prefab, float x, float z, fl
 const char *mtn_house_variant_name(int v);
 
 int mtn_house_find_site(const mtn_terrain *t, const mtn_flora *f, vec3 player, float yaw, mtn_house_site *out);
+/* Fit the stairs of a site to the terrain: the run ends where the steps meet dry ground. */
+int mtn_house_fit_stairs(const mtn_terrain *t, mtn_house_site *s);
+/* World position just below the last step (where the stairs reach the ground). */
+vec3 mtn_house_stair_foot(const mtn_house *h);
 void mtn_house_summon(mtn_house *h, const mtn_house_site *s, uint32_t seed);
 void mtn_house_unsummon(mtn_house *h);
 void mtn_house_update(mtn_house *h, float dt);

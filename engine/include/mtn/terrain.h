@@ -7,6 +7,8 @@
 
 #define MTN_MAX_VIEWPOINTS 24
 #define MTN_NO_WATER (-1.0e9f)
+#define MTN_TRAIL_MAX_GRADE 0.30f /* rise per metre along the trail */
+#define MTN_TRAIL_WIDTH 2.4f
 
 typedef enum {
     MTN_BIOME_WATER = 0,
@@ -52,6 +54,7 @@ typedef struct {
     float *moist;   /* 0..1 */
     uint8_t *biome; /* mtn_biome per grid point */
     float *trail_dist; /* distance to trail in metres (capped) */
+    int *trail_near;   /* nearest trail sample per grid point or -1 */
     float min_h, max_h;
     vec3 center;
     vec3 summit;
@@ -60,6 +63,10 @@ typedef struct {
     int trail_len;
     vec3 *cairns;
     int cairn_count;
+    vec3 *posts;          /* painted trail marker posts */
+    int post_count;
+    vec3 signpost;        /* signpost at the trailhead */
+    float signpost_yaw;
     mtn_viewpoint vps[MTN_MAX_VIEWPOINTS];
     int vp_count;
     int lake_count;
@@ -77,6 +84,10 @@ float mtn_terrain_altitude_frac(const mtn_terrain *t, float h);
 mtn_biome mtn_terrain_biome(const mtn_terrain *t, float x, float z);
 float mtn_terrain_moisture(const mtn_terrain *t, float x, float z);
 float mtn_terrain_trail_distance(const mtn_terrain *t, float x, float z);
+/* Closest point on the trail centre line (y = path surface); 0 when far from the trail. */
+int mtn_terrain_trail_nearest(const mtn_terrain *t, float x, float z, vec3 *closest);
+/* Height of the level path surface when (x, z) is on the path strip. */
+int mtn_terrain_trail_surface(const mtn_terrain *t, float x, float z, float *y);
 int mtn_terrain_in_playable(const mtn_terrain *t, float x, float z);
 /* Clamp a position into the playable disc; returns 1 when it was moved. */
 int mtn_terrain_clamp_playable(const mtn_terrain *t, vec3 *p);

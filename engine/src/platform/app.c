@@ -555,7 +555,8 @@ static int t_check(lua_State *L) {
 }
 static int t_screenshot(lua_State *L) {
     snprintf(g_app->test.screenshot, sizeof g_app->test.screenshot, "%s", luaL_checkstring(L, 1));
-    return 0;
+    lua_pushinteger(L, 1); /* capture this frame before the script goes on */
+    return lua_yield(L, 1);
 }
 static int t_resize(lua_State *L) {
     SDL_SetWindowSize(g_app->win, (int)luaL_checkinteger(L, 1), (int)luaL_checkinteger(L, 2));

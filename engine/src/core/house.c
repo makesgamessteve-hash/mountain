@@ -10,13 +10,16 @@
 #define WHITE 0xFFFFFFFFu
 #define PORCH_DEPTH 1.6f
 #define PORCH_HALF 1.6f
-#define STAIR_GRADE 0.7f
+#define STAIR_GRADE MTN_STAIR_GRADE
+#define HOUSE_W 6.0f
+#define HOUSE_D 5.0f
+#define DECK 1.2f
 #define PLANE_INSET 0.15f
 
 void mtn_house_init(mtn_house *h) {
     memset(h, 0, sizeof *h);
-    h->width = 6.0f;
-    h->depth = 5.0f;
+    h->width = HOUSE_W;
+    h->depth = HOUSE_D;
     h->wall_h = 2.7f;
 }
 
@@ -63,7 +66,61 @@ static vec3 flat_dir(vec3 d, vec3 fallback) {
     return v3_len(r) > 0.5f ? r : fallback;
 }
 
-static int evaluate_site(const mtn_terrain *t, const mtn_flora *f, vec3 c, vec3 player, vec3 fwd, mtn_house_site *s) {
+/* ------------------------------------------------------------------ stairs */
+
+static int has_platform(int variant) { return variant == MTN_HV_TREE || variant == MTN_HV_STILTS; }
+
+/* outward axis of a stair side in house-local coordinates */
+static vec3 stair_axis(int side) {
+    static const float ax[4][2] = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
+    return v3(ax[side & 3][0], 0, ax[side & 3][1]);
+}
+
+static float stair_start_at(int variant, int side) {
+    if (!has_platform(variant)) return HOUSE_D * 0.5f + PORCH_DEPTH;
+    return (side < 2 ? HOUSE_D * 0.5f : HOUSE_W * 0.5f) + DECK;
+}
+
+/* Walk down the stairs from the porch or platform edge until the steps meet the ground;
+ * 1 when they end on dry ground within the longest allowed run. */
+static int stairs_reach(const mtn_terrain *t, vec3 origin, vec3 right, vec3 front, float floor_y, int variant, int side,
+                        float *len) {
+    vec3 ax = stair_axis(side);
+    float s0 = stair_start_at(variant, side);
+    for (float d = 0.0f; d <= MTN_STAIR_MAX_RUN; d += 0.1f) {
+        float u = s0 + d;
+        vec3 w = v3_add(origin, v3_add(v3_scale(right, ax.x * u), v3_scale(front, ax.z * u)));
+        float g = mtn_terrain_height(t, w.x, w.z);
+        if (floor_y - d * STAIR_GRADE > g + MTN_STAIR_LAST_STEP) continue;
+        float wl = mtn_terrain_water(t, w.x, w.z);
+        if (wl != MTN_NO_WATER && wl - g > 0.2f) return 0; /* would end in the water */
+        *len = d;
+        return 1;
+    }
+    return 0;
+}
+
+int mtn_house_fit_stairs(const mtn_terrain *t, mtn_house_site *s) {
+    vec3 front = flat_dir(s->front, v3(0, 0, 1));
+    vec3 right = v3_cross(v3(0, 1, 0), front);
+    int sides = has_platform(s->variant) ? 4 : 1;
+    float best = 1e30f;
+    int found = 0;
+    for (int side = 0; side < sides; side++) {
+        float len;
+        if (!stairs_reach(t, s->pos, right, front, s->pos.y, s->variant, side, &len)) continue;
+        float score = len + (side == 0 ? 0.0f : 2.0f); /* the front is nicest */
+        if (score < best) {
+            best = score;
+            s->stair_side = side;
+            s->stair_len = len;
+            found = 1;
+        }
+    }
+    return found;
+}
+
+static int evaluate_shape(const mtn_terrain *t, const mtn_flora *f, vec3 c, vec3 player, vec3 fwd, mtn_house_site *s) {
     memset(s, 0, sizeof *s);
     s->tree = -1;
     vec3 front = flat_dir(v3_sub(player, c), v3_scale(fwd, -1.0f));
@@ -129,6 +186,16 @@ static int evaluate_site(const mtn_terrain *t, const mtn_flora *f, vec3 c, vec3 
     return 1;
 }
 
+static int evaluate_site(const mtn_terrain *t, const mtn_flora *f, vec3 c, vec3 player, vec3 fwd, mtn_house_site *s) {
+    if (!evaluate_shape(t, f, c, player, fwd, s)) return 0;
+    if (!mtn_house_fit_stairs(t, s)) {
+        s->ok = 0;
+        snprintf(s->reason, sizeof s->reason, "no way down to the ground from here");
+        return 0;
+    }
+    return 1;
+}
+
 int mtn_house_find_site(const mtn_terrain *t, const mtn_flora *f, vec3 player, float yaw, mtn_house_site *out) {
     vec3 fwd = v3(sinf(yaw), 0, -cosf(yaw));
     vec3 target = v3_add(player, v3_scale(fwd, 8.0f));
@@ -149,7 +216,7 @@ int mtn_house_find_site(const mtn_terrain *t, const mtn_flora *f, vec3 player, f
                 if (!found) memcpy(out->reason, cand.reason, sizeof out->reason);
                 continue;
             }
-            float score = v3_dist_xz(c, target) + (cand.ground_max - cand.ground_min) * 1.5f;
+            float score = v3_dist_xz(c, target) + (cand.ground_max - cand.ground_min) * 1.5f + cand.stair_len * 0.3f;
             if (cand.variant == MTN_HV_TREE) score -= 4.0f;
             if (score < best) {
                 best = score;
@@ -178,6 +245,10 @@ void mtn_house_summon(mtn_house *h, const mtn_house_site *s, uint32_t seed) {
     h->ground_min = s->ground_min;
     h->water_level = s->water_level;
     h->tree = s->tree;
+    h->stair_side = s->stair_side & 3;
+    h->stair_len = s->stair_len;
+    if (h->stair_len <= 0.0f && h->floor_y - h->ground_min > 0.3f) h->stair_len = (h->floor_y - h->ground_min) / STAIR_GRADE;
+    if (!has_platform(h->variant)) h->stair_side = 0;
     h->door_angle = 0.0f;
     h->door_open = 0;
     h->inside = 0;
@@ -237,8 +308,21 @@ float mtn_house_door_distance(const mtn_house *h, vec3 p) {
 
 /* ------------------------------------------------------------------ surfaces & collision */
 
-static float stair_start(const mtn_house *h) {
-    return h->depth * 0.5f + (h->variant == MTN_HV_TREE || h->variant == MTN_HV_STILTS ? 1.2f : PORCH_DEPTH);
+static float stair_start(const mtn_house *h) { return stair_start_at(h->variant, h->stair_side); }
+
+/* along (u) and across (v) the stairs, in house-local coordinates */
+static void stair_coords(const mtn_house *h, vec3 l, float *u, float *v) {
+    vec3 ax = stair_axis(h->stair_side);
+    *u = l.x * ax.x + l.z * ax.z;
+    *v = l.x * ax.z - l.z * ax.x;
+}
+
+vec3 mtn_house_stair_foot(const mtn_house *h) {
+    vec3 ax = stair_axis(h->stair_side);
+    float u = stair_start(h) + h->stair_len;
+    vec3 w = m4_mul_point(h->frame, v3(ax.x * u, 0, ax.z * u));
+    w.y = h->floor_y - h->stair_len * STAIR_GRADE;
+    return w;
 }
 
 int mtn_house_surface(const mtn_house *h, float x, float z, float *height) {
@@ -257,15 +341,12 @@ int mtn_house_surface(const mtn_house *h, float x, float z, float *height) {
         any = 1;
     }
     /* stairs down to the ground */
-    float s0 = stair_start(h);
-    float drop = h->floor_y - h->ground_min;
-    if (drop > 0.3f) {
-        float len = drop / STAIR_GRADE;
-        if (l.x >= -0.8f && l.x <= 0.8f && l.z >= s0 && l.z <= s0 + len) {
-            float sh = h->floor_y - (l.z - s0) * STAIR_GRADE;
-            if (sh > best) best = sh;
-            any = 1;
-        }
+    float s0 = stair_start(h), u, v;
+    stair_coords(h, l, &u, &v);
+    if (h->stair_len > 0.0f && fabsf(v) <= 0.8f && u >= s0 && u <= s0 + h->stair_len) {
+        float sh = h->floor_y - (u - s0) * STAIR_GRADE;
+        if (sh > best) best = sh;
+        any = 1;
     }
     if (any) *height = best;
     return any;
@@ -387,7 +468,7 @@ void mtn_house_build_exterior(const mtn_house *h, const mtn_terrain *t, const mt
         box(&b, v3(-hw - 0.1f, base, -hd - 0.1f), v3(hw + 0.1f, 0.0f, hd + 0.1f), stone, 5, MTN_VF_SNOW, 1.0f);
     } else {
         float py = h->variant == MTN_HV_TREE ? base : base - 1.0f;
-        float pw = hw + 1.2f, pd = hd + 1.2f;
+        float pw = hw + DECK, pd = hd + DECK;
         box(&b, v3(-pw, -0.25f, -pd), v3(pw, 0.0f, pd), wood, 2, MTN_VF_SNOW, 0.8f);
         float xs[3] = {-pw + 0.2f, 0.0f, pw - 0.2f}, zs[2] = {-pd + 0.2f, pd - 0.2f};
         for (int i = 0; i < 3; i++)
@@ -403,11 +484,20 @@ void mtn_house_build_exterior(const mtn_house *h, const mtn_terrain *t, const mt
         /* railing around the platform, open at the stairs */
         uint32_t rc = mtn_rgb(140, 100, 66);
         const float ry = 0.95f;
-        cyl(&b, v3(-pw, ry, -pd), v3(pw, ry, -pd), 0.05f, 0.05f, 4, rc, NO_TEXTURE, 1.0f);
-        cyl(&b, v3(-pw, ry, -pd), v3(-pw, ry, pd), 0.05f, 0.05f, 4, rc, NO_TEXTURE, 1.0f);
-        cyl(&b, v3(pw, ry, -pd), v3(pw, ry, pd), 0.05f, 0.05f, 4, rc, NO_TEXTURE, 1.0f);
-        cyl(&b, v3(-pw, ry, pd), v3(-0.9f, ry, pd), 0.05f, 0.05f, 4, rc, NO_TEXTURE, 1.0f);
-        cyl(&b, v3(0.9f, ry, pd), v3(pw, ry, pd), 0.05f, 0.05f, 4, rc, NO_TEXTURE, 1.0f);
+        {
+            /* the four edges: front, back, right, left; the stair side has a gap */
+            vec3 ea[4] = {v3(-pw, ry, pd), v3(-pw, ry, -pd), v3(pw, ry, -pd), v3(-pw, ry, -pd)};
+            vec3 eb[4] = {v3(pw, ry, pd), v3(pw, ry, -pd), v3(pw, ry, pd), v3(-pw, ry, pd)};
+            for (int e = 0; e < 4; e++) {
+                if (e == h->stair_side && h->stair_len > 0.0f) {
+                    vec3 mid = v3_scale(v3_add(ea[e], eb[e]), 0.5f), dir = v3_norm(v3_sub(eb[e], ea[e]));
+                    cyl(&b, ea[e], v3_sub(mid, v3_scale(dir, 0.9f)), 0.05f, 0.05f, 4, rc, NO_TEXTURE, 1.0f);
+                    cyl(&b, v3_add(mid, v3_scale(dir, 0.9f)), eb[e], 0.05f, 0.05f, 4, rc, NO_TEXTURE, 1.0f);
+                } else {
+                    cyl(&b, ea[e], eb[e], 0.05f, 0.05f, 4, rc, NO_TEXTURE, 1.0f);
+                }
+            }
+        }
         float px4[4] = {-pw, pw, -pw, pw}, pz4[4] = {-pd, -pd, pd, pd};
         for (int i = 0; i < 4; i++) cyl(&b, v3(px4[i], 0, pz4[i]), v3(px4[i], ry, pz4[i]), 0.06f, 0.06f, 4, rc, NO_TEXTURE, 1.0f);
     }
@@ -416,18 +506,24 @@ void mtn_house_build_exterior(const mtn_house *h, const mtn_terrain *t, const mt
         box(&b, v3(-PORCH_HALF, -0.2f, hd), v3(PORCH_HALF, 0.0f, hd + PORCH_DEPTH), wood, 2, MTN_VF_SNOW, 0.8f);
         box(&b, v3(-PORCH_HALF, base, hd), v3(PORCH_HALF, -0.2f, hd + PORCH_DEPTH), stone, 5, 0, 1.0f);
     }
-    /* stairs */
-    float s0 = stair_start(h);
-    float drop = h->floor_y - h->ground_min;
-    if (drop > 0.3f) {
+    /* stairs, built along their own axis */
+    if (h->stair_len > 0.0f) {
+        vec3 ax = stair_axis(h->stair_side);
+        bctx st = {solid, m4_mul(h->frame, m4_from_basis(v3(0, 0, 0), v3_cross(v3(0, 1, 0), ax), v3(0, 1, 0), ax))};
+        float s0 = stair_start(h), len = h->stair_len, drop = len * STAIR_GRADE;
         int steps = (int)(drop / 0.22f) + 1;
-        float len = drop / STAIR_GRADE;
         for (int i = 0; i < steps; i++) {
             float y = -drop * (float)(i + 1) / (float)steps;
             float z = s0 + len * (float)i / (float)steps;
-            box(&b, v3(-0.8f, y - 0.08f, z), v3(0.8f, y + drop / (float)steps, z + len / (float)steps), wood, 2, MTN_VF_SNOW, 0.8f);
+            box(&st, v3(-0.8f, y - 0.08f, z), v3(0.8f, y + drop / (float)steps, z + len / (float)steps), wood, 2, MTN_VF_SNOW, 0.8f);
         }
-        cyl(&b, v3(-0.85f, 0.9f, s0), v3(-0.85f, 0.9f - drop, s0 + len), 0.04f, 0.04f, 4, mtn_rgb(140, 100, 66), NO_TEXTURE, 1.0f);
+        /* stringers down to the ground and a handrail */
+        for (int sd = -1; sd <= 1; sd += 2) {
+            float x = 0.82f * (float)sd;
+            cyl(&st, v3(x, -0.1f, s0), v3(x, -drop - 0.1f, s0 + len), 0.06f, 0.06f, 4, mtn_rgb(120, 90, 62), NO_TEXTURE, 1.0f);
+        }
+        cyl(&st, v3(-0.85f, 0.9f, s0), v3(-0.85f, 0.9f - drop, s0 + len), 0.04f, 0.04f, 4, mtn_rgb(140, 100, 66), NO_TEXTURE, 1.0f);
+        cyl(&st, v3(-0.85f, -drop, s0 + len), v3(-0.85f, 0.9f - drop, s0 + len), 0.05f, 0.05f, 4, mtn_rgb(140, 100, 66), NO_TEXTURE, 1.0f);
     }
 
     /* log walls (textured boxes) with door and window holes */

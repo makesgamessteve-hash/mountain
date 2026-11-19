@@ -1,6 +1,7 @@
 #include "test.h"
 #include "mtn/terrain.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 static mtn_terrain_params small_params(uint32_t seed) {
@@ -92,6 +93,77 @@ static void test_trail_and_viewpoints(void) {
     mtn_terrain_free(&t);
 }
 
+/* The trail of a game-sized world: winding, gentle, level across, well marked. */
+static void test_trail_shape(void) {
+    mtn_terrain t;
+    mtn_terrain_params p;
+    mtn_terrain_default_params(&p);
+    p.seed = 777;
+    p.size = 257;
+    p.cell = 12.0f;
+    p.erosion_drops = 12000;
+    CHECK(mtn_terrain_generate(&t, &p));
+    CHECK(t.trail_len > 100);
+    CHECK(v3_dist_xz(t.trail[t.trail_len - 1], t.summit) < 1.0f);
+    CHECK(t.summit.y >= t.trail[t.trail_len - 1].y - 0.2f); /* the summit is not cut down */
+    float len = 0.0f;
+    float *s = malloc(sizeof(float) * (size_t)t.trail_len);
+    s[0] = 0.0f;
+    for (int i = 1; i < t.trail_len; i++) {
+        len += v3_dist_xz(t.trail[i - 1], t.trail[i]);
+        s[i] = len;
+        CHECK(v3_dist_xz(t.trail[i - 1], t.trail[i]) < 3.1f);
+    }
+    /* winding: much longer than the straight line */
+    CHECK(len > 1.5f * v3_dist_xz(t.trail[0], t.summit));
+    /* gentle: no stretch of 20 m climbs or drops faster than the limit */
+    float worst = 0.0f;
+    for (int i = 0, j = 0; i < t.trail_len; i++) {
+        while (j < t.trail_len - 1 && s[j] - s[i] < 20.0f) j++;
+        if (s[j] - s[i] < 19.0f) break;
+        float g = fabsf(t.trail[j].y - t.trail[i].y) / (s[j] - s[i]);
+        if (g > worst) worst = g;
+    }
+    CHECK(worst <= MTN_TRAIL_MAX_GRADE + 0.01f);
+    free(s);
+    /* level across: the ground never rises above the path strip, which is walkable */
+    int biomes = 0, above = 0;
+    for (int i = 0; i + 1 < t.trail_len; i++) {
+        vec3 a = t.trail[i], b = t.trail[i + 1];
+        vec3 d = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
+        for (int k = -2; k <= 2; k++) {
+            float x = a.x - d.z * 0.55f * (float)k, z = a.z + d.x * 0.55f * (float)k;
+            if (mtn_terrain_height(&t, x, z) > a.y + 0.05f) above++;
+        }
+        float y;
+        CHECK(mtn_terrain_trail_surface(&t, a.x, a.z, &y));
+        CHECK_NEAR(y, a.y, 0.3f);
+        biomes |= 1 << mtn_terrain_biome(&t, a.x, a.z);
+    }
+    CHECK(above == 0);
+    int kinds = 0;
+    for (int b = 0; b < MTN_BIOME_COUNT; b++) kinds += (biomes >> b) & 1;
+    CHECK(kinds >= 3); /* through forest and meadows up to the rocks */
+    /* off the path there is no path surface */
+    float y;
+    vec3 a = t.trail[t.trail_len / 2], b = t.trail[t.trail_len / 2 + 1];
+    vec3 d = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
+    vec3 c;
+    CHECK(mtn_terrain_trail_nearest(&t, a.x - d.z * 2.0f, a.z + d.x * 2.0f, &c));
+    CHECK(v3_dist_xz(c, a) < 2.5f);
+    CHECK(!mtn_terrain_trail_surface(&t, a.x - d.z * 2.0f, a.z + d.x * 2.0f, &y) ||
+          v3_dist_xz(c, v3(a.x - d.z * 2.0f, 0, a.z + d.x * 2.0f)) <= MTN_TRAIL_WIDTH * 0.5f);
+    CHECK(!mtn_terrain_trail_nearest(&t, -1000.0f, -1000.0f, &c));
+    /* markers: painted posts beside the path, a signpost and a cairn at the trailhead */
+    CHECK(t.post_count > 10);
+    for (int i = 0; i < t.post_count; i++)
+        CHECK(mtn_terrain_trail_nearest(&t, t.posts[i].x, t.posts[i].z, &c) && v3_dist_xz(c, t.posts[i]) < 2.5f);
+    CHECK(v3_dist_xz(t.signpost, t.trail[0]) < 3.0f);
+    CHECK(v3_dist_xz(t.cairns[0], t.trail[0]) < 3.0f);
+    CHECK(t.cairn_count >= t.trail_len / 40);
+    mtn_terrain_free(&t);
+}
+
 static void test_lakes(void) {
     /* A bowl must become a lake; with a sea level everything low is water. */
     mtn_terrain t;
@@ -147,6 +219,7 @@ MTN_SUITE(terrain) {
     TEST_RUN(test_generate_deterministic);
     TEST_RUN(test_queries);
     TEST_RUN(test_trail_and_viewpoints);
+    TEST_RUN(test_trail_shape);
     TEST_RUN(test_lakes);
     TEST_RUN(test_erosion);
 }

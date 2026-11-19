@@ -217,6 +217,12 @@ static int l_world_checksum(lua_State *L) {
     return 1;
 }
 static int l_world_trailhead(lua_State *L) { return push3(L, g_game->terrain.trailhead); }
+/* world.trail_point(i): the i-th point (1-based) of the trail centre line, nil past the end */
+static int l_world_trail_point(lua_State *L) {
+    lua_Integer i = luaL_checkinteger(L, 1);
+    if (i < 1 || i > g_game->terrain.trail_len) return 0;
+    return push3(L, g_game->terrain.trail[i - 1]);
+}
 static int l_world_info(lua_State *L) {
     mtn_terrain *t = &g_game->terrain;
     lua_newtable(L);
@@ -226,6 +232,7 @@ static int l_world_info(lua_State *L) {
     lua_pushinteger(L, t->lake_count); lua_setfield(L, -2, "lakes");
     lua_pushinteger(L, t->trail_len); lua_setfield(L, -2, "trail_points");
     lua_pushinteger(L, t->cairn_count); lua_setfield(L, -2, "cairns");
+    lua_pushinteger(L, t->post_count); lua_setfield(L, -2, "trail_posts");
     lua_pushinteger(L, t->vp_count); lua_setfield(L, -2, "viewpoints");
     lua_pushinteger(L, g_game->flora.count); lua_setfield(L, -2, "plants");
     lua_pushnumber(L, g_game->snowline); lua_setfield(L, -2, "snowline");
@@ -860,7 +867,7 @@ static void open_api(lua_State *L) {
         {"settings", l_engine_settings}, {"xr", l_engine_xr}, {NULL, NULL}};
     static const luaL_Reg world[] = {{"params", l_world_params}, {"generate", l_world_generate}, {"seed", l_world_seed},
         {"exists", l_world_exists}, {"height", l_world_height}, {"biome", l_world_biome}, {"summit", l_world_summit},
-        {"trailhead", l_world_trailhead}, {"info", l_world_info}, {"altitude", l_world_altitude}, {"slope", l_world_slope},
+        {"trailhead", l_world_trailhead}, {"trail_point", l_world_trail_point}, {"info", l_world_info}, {"altitude", l_world_altitude}, {"slope", l_world_slope},
         {"water", l_world_water}, {"viewpoint", l_world_viewpoint}, {"checksum", l_world_checksum}, {NULL, NULL}};
     static const luaL_Reg planet[] = {{"set", l_planet_set}, {"name", l_planet_name}, {NULL, NULL}};
     static const luaL_Reg tm[] = {{"hour", l_time_hour}, {"set_hour", l_time_set_hour}, {"day", l_time_day},

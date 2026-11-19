@@ -77,7 +77,7 @@ float mtn_flora_habitat(const mtn_plant_species *s, const mtn_terrain *t, float 
     float fa = band(a, s->alt_min, s->alt_max, 0.03f);
     float fs = 1.0f - mtn_smoothstep(s->slope_max - 0.05f, s->slope_max + 0.05f, sl);
     float fm = band(m, s->moist_min, s->moist_max, 0.1f);
-    float keep_clear = s->kind == MTN_PLANT_GROUND ? 0.8f : 3.0f;
+    float keep_clear = s->kind == MTN_PLANT_GROUND ? MTN_TRAIL_WIDTH * 0.5f + 0.3f : (s->kind == MTN_PLANT_TREE ? 5.0f : 3.0f);
     float ft = mtn_smoothstep(keep_clear, keep_clear + 2.5f, mtn_terrain_trail_distance(t, x, z));
     return fa * fs * fm * ft;
 }

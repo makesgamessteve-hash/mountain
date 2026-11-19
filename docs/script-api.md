@@ -90,10 +90,11 @@ end
 | `world.water(x, z)` | lake surface height or `nil` |
 | `world.summit()` | `x, y, z` of the summit |
 | `world.trailhead()` | `x, y, z` where the hiking trail starts |
+| `world.trail_point(i)` | `x, y, z` of the i-th point (1-based, every 2 m) of the trail centre line; `y` is the level path surface; nothing past the end |
 | `world.viewpoint(i)` | `x, y, z, yaw` of scenic viewpoint `i` (1-based) or `nil` |
 | `world.altitude(h)` | height `h` as a fraction 0..1 of the terrain range |
 | `world.checksum()` | FNV-1a checksum of the generated world (heights, water, biomes, trail, cairns, viewpoints) |
-| `world.info()` | table: `size min_height max_height lakes trail_points cairns viewpoints plants snowline` |
+| `world.info()` | table: `size min_height max_height lakes trail_points cairns trail_posts viewpoints plants snowline` |
 
 ## planet
 

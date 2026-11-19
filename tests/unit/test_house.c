@@ -447,7 +447,8 @@ static void test_surfaces(void) {
     w = to_world(&h, 0.5f, 0, 4.1f + 0.5f);
     CHECK(mtn_house_surface(&h, w.x, w.z, &y));
     CHECK_NEAR(y, h.floor_y - 0.5f * 0.7f, 1e-3);
-    w = to_world(&h, 0, 0, 4.1f + drop / 0.7f + 0.2f);
+    CHECK(h.stair_len >= drop / 0.7f - 0.1f); /* the slope falls away: the run is fitted to the ground */
+    w = to_world(&h, 0, 0, 4.1f + h.stair_len + 0.2f);
     CHECK(!mtn_house_surface(&h, w.x, w.z, &y));
     w = to_world(&h, 1.0f, 0, 4.6f); /* beside the stairs */
     CHECK(!mtn_house_surface(&h, w.x, w.z, &y));
@@ -470,6 +471,86 @@ static void test_surfaces(void) {
     CHECK_NEAR(y, h.floor_y - 0.035f, 1e-3);
     w = to_world(&h, 4.5f, 0, 0);
     CHECK(!mtn_house_surface(&h, w.x, w.z, &y));
+    mtn_terrain_free(&t);
+}
+
+/* The last step of the stairs always ends on dry ground the player can stand on. */
+static void check_stair_foot(const mtn_terrain *t, const mtn_house *h) {
+    vec3 foot = mtn_house_stair_foot(h);
+    float g = mtn_terrain_height(t, foot.x, foot.z);
+    float last = h->floor_y - h->stair_len * MTN_STAIR_GRADE;
+    CHECK(last - g <= MTN_STAIR_LAST_STEP + 0.01f);
+    CHECK(last - g >= -0.6f);
+    float wl = mtn_terrain_water(t, foot.x, foot.z);
+    CHECK(wl == MTN_NO_WATER || wl - g <= 0.2f);
+    CHECK(h->stair_len <= MTN_STAIR_MAX_RUN);
+}
+
+static void test_stairs_reach_ground(void) {
+    mtn_terrain t;
+    mtn_house_site s;
+    static mtn_house h;
+    /* steep hillside: the ground keeps falling below the porch */
+    for (int k = 0; k < 4; k++) {
+        float slope = 0.2f + 0.1f * (float)k;
+        make_terrain(&t, 100, slope);
+        if (mtn_house_find_site(&t, NULL, player_at(&t), (float)k * 1.3f, &s)) {
+            make_present(&h, &s, 30u + (uint32_t)k);
+            check_stair_foot(&t, &h);
+        }
+        mtn_terrain_free(&t);
+    }
+    /* stilts: the door looks over the lake, the stairs lead to the shore */
+    make_terrain(&t, 100, 0);
+    set_water(&t, 37, TN - 1, 0, TN - 1, 100.6f);
+    for (int i = 0; i < TN * TN; i++)
+        if (t.water[i] != MTN_NO_WATER) t.h[i] = 99.0f;
+    CHECK(mtn_house_find_site(&t, NULL, player_at(&t), MTN_PI * 0.5f, &s));
+    make_present(&h, &s, 40);
+    CHECK(h.variant == MTN_HV_STILTS);
+    CHECK(h.front.x > 0.7f); /* facing the water */
+    CHECK(h.stair_len > 0.0f);
+    check_stair_foot(&t, &h);
+    vec3 foot = mtn_house_stair_foot(&h);
+    float y;
+    static const float axes[4][2] = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
+    float edge = (h.stair_side < 2 ? h.depth : h.width) * 0.5f + 1.2f + 0.3f;
+    vec3 top = to_world(&h, axes[h.stair_side][0] * edge, 0, axes[h.stair_side][1] * edge);
+    CHECK(mtn_house_surface(&h, top.x, top.z, &y));
+    CHECK_NEAR(y, h.floor_y - 0.3f * MTN_STAIR_GRADE, 1e-3);
+    mtn_mesh so, sp, gl;
+    mtn_mesh_init(&so);
+    mtn_mesh_init(&sp);
+    mtn_mesh_init(&gl);
+    mtn_house_build_exterior(&h, &t, NULL, &so, &sp, &gl);
+    CHECK(mesh_ok(&so));
+    vec3 mn, mx;
+    mtn_mesh_bounds(&so, &mn, &mx);
+    CHECK(mn.x <= foot.x + 1.0f && mx.x >= foot.x - 1.0f && mn.z <= foot.z + 1.0f && mx.z >= foot.z - 1.0f);
+    mtn_mesh_free(&so);
+    mtn_mesh_free(&sp);
+    mtn_mesh_free(&gl);
+    /* a fitted site that cannot reach dry ground is rejected */
+    mtn_house_site odd = s;
+    odd.variant = MTN_HV_COTTAGE;
+    odd.pos.y += 40.0f;
+    CHECK(!mtn_house_fit_stairs(&t, &odd));
+    /* a site with water all around the deck has nowhere to put the stairs */
+    odd = s;
+    set_water(&t, 0, TN - 1, 0, TN - 1, 100.6f);
+    for (int i = 0; i < TN * TN; i++) t.h[i] = 99.0f;
+    CHECK(!mtn_house_fit_stairs(&t, &odd));
+    CHECK(!mtn_house_find_site(&t, NULL, player_at(&t), 0.0f, &s));
+    mtn_terrain_free(&t);
+    /* tree house: stairs from the platform reach the forest floor */
+    make_terrain(&t, 100, 0.1f);
+    mtn_flora f;
+    make_flora(&f, v3(64, mtn_terrain_height(&t, 64, 56), 56), 15.0f, MTN_PLANT_TREE);
+    CHECK(mtn_house_find_site(&t, &f, player_at(&t), 0.0f, &s));
+    make_present(&h, &s, 41);
+    CHECK(h.variant == MTN_HV_TREE);
+    check_stair_foot(&t, &h);
+    mtn_flora_free(&f);
     mtn_terrain_free(&t);
 }
 
@@ -879,6 +960,7 @@ MTN_SUITE(house) {
     TEST_RUN(test_site_tree);
     TEST_RUN(test_lifecycle);
     TEST_RUN(test_surfaces);
+    TEST_RUN(test_stairs_reach_ground);
     TEST_RUN(test_collision);
     TEST_RUN(test_portals);
     TEST_RUN(test_exterior_variants);

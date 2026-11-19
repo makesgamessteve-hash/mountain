@@ -482,18 +482,84 @@ static void build_water_chunk(const mtn_terrain *t, int cx, int cz, mtn_mesh *m)
         }
 }
 
+static vec3 trail_dir(const mtn_terrain *t, int i) {
+    vec3 a = t->trail[i > 0 ? i - 1 : 0], b = t->trail[i + 1 < t->trail_len ? i + 1 : i];
+    vec3 d = v3(b.x - a.x, 0, b.z - a.z);
+    return v3_len(d) > 1e-4f ? v3_norm(d) : v3(0, 0, -1);
+}
+
+/* The path: a level 2.4 m gravel strip, edge stones, and dry-stone walls down to the
+ * ground wherever the strip is built up above the terrain. */
 static void build_trail(const mtn_terrain *t, mtn_mesh *m) {
     mtn_mesh_clear(m);
+    const float hw = MTN_TRAIL_WIDTH * 0.5f;
+    mtn_material wall = mtn_mat(mtn_rgb(158, 150, 138), 5, 0, 1.0f);
     for (int i = 0; i + 1 < t->trail_len; i++) {
         vec3 a = t->trail[i], b = t->trail[i + 1];
-        vec3 d = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
-        vec3 side = v3(-d.z, 0, d.x);
-        float w = 0.75f + 0.2f * mtn_hash_unit(mtn_hash_u32((uint32_t)i));
-        vec3 p[4] = {v3_add(a, v3_scale(side, -w)), v3_add(a, v3_scale(side, w)), v3_add(b, v3_scale(side, w)), v3_add(b, v3_scale(side, -w))};
-        for (int k = 0; k < 4; k++) p[k].y = mtn_terrain_height(t, p[k].x, p[k].z) + 0.07f;
-        int shade = 100 + (int)(mtn_hash_u32((uint32_t)i * 7u) % 30u);
-        mtn_material mat = mtn_mat(mtn_rgb(shade + 25, shade, shade - 25), 255, MTN_VF_SNOW, 1.0f);
-        mtn_mesh_quad(m, m4_identity(), p[1], p[0], p[3], p[2], &mat, v2(0, 0), v2(1, 1));
+        vec3 da = trail_dir(t, i), db = trail_dir(t, i + 1);
+        vec3 sa = v3(-da.z, 0, da.x), sb = v3(-db.z, 0, db.x);
+        a.y += 0.04f;
+        b.y += 0.04f;
+        vec3 p0 = v3_add(a, v3_scale(sa, -hw)), p1 = v3_add(a, v3_scale(sa, hw));
+        vec3 p2 = v3_add(b, v3_scale(sb, hw)), p3 = v3_add(b, v3_scale(sb, -hw));
+        uint32_t hsh = mtn_hash_u32((uint32_t)i * 7u);
+        int shade = 182 + (int)(hsh % 22u);
+        mtn_material grav = mtn_mat(mtn_rgb(shade, shade - 10, shade - 26), 29, 0, 1.0f); /* trodden: no snow */
+        float v0 = (float)(i % 4) * 0.25f;
+        mtn_mesh_quad(m, m4_identity(), p0, p1, p2, p3, &grav, v2(0, v0), v2(1, v0 + 0.25f));
+        /* side walls: from the strip edge down below the ground */
+        vec3 q[4] = {p0, p3, p2, p1};
+        for (int side = 0; side < 2; side++) {
+            vec3 e0 = q[side * 2], e1 = q[side * 2 + 1];
+            float g0 = mtn_terrain_height(t, e0.x, e0.z) - 0.3f, g1 = mtn_terrain_height(t, e1.x, e1.z) - 0.3f;
+            if (g0 > e0.y - 0.08f && g1 > e1.y - 0.08f) continue; /* buried */
+            vec3 l0 = v3(e0.x, fminf(g0, e0.y - 0.1f), e0.z), l1 = v3(e1.x, fminf(g1, e1.y - 0.1f), e1.z);
+            float hgt = fmaxf(e0.y - l0.y, e1.y - l1.y);
+            mtn_mesh_quad(m, m4_identity(), l1, l0, e0, e1, &wall, v2(0, 0), v2(0.5f, fminf(hgt * 0.5f, 4.0f)));
+        }
+        /* edge stones on alternating sides */
+        float sgn = (i & 1) ? 1.0f : -1.0f;
+        vec3 c = v3_add(a, v3_scale(sa, sgn * (hw + 0.05f)));
+        c.y = fmaxf(mtn_terrain_height(t, c.x, c.z), a.y - 0.12f);
+        float sz = 0.16f + 0.1f * mtn_hash_unit(hsh >> 3);
+        int g = 150 + (int)((hsh >> 8) % 40u);
+        mtn_material st = mtn_mat(mtn_rgb(g, g - 4, g - 10), 5, MTN_VF_SNOW, 2.0f);
+        mtn_mesh_box(m, m4_from_basis(c, sa, v3(0, 1, 0), v3_scale(da, -1.0f)), v3(-sz, -0.1f, -sz * 1.6f), v3(sz, sz * 0.9f, sz * 1.6f), &st, 0x3b);
+    }
+}
+
+/* Painted red-white-red posts along the path and a signpost at the trailhead. */
+static void build_markers(const mtn_terrain *t, mtn_mesh *m) {
+    mtn_material wood = mtn_mat(mtn_rgb(120, 92, 62), 0, 0, 1.0f);
+    mtn_material red = mtn_mat(mtn_rgb(200, 36, 30), 255, 0, 1.0f);
+    mtn_material white = mtn_mat(mtn_rgb(236, 234, 228), 255, 0, 1.0f);
+    for (int i = 0; i < t->post_count; i++) {
+        vec3 p = t->posts[i];
+        mtn_mesh_cylinder(m, m4_identity(), v3(p.x, p.y - 0.3f, p.z), v3(p.x, p.y + 0.95f, p.z), 0.08f, 0.075f, 6, &wood, 1);
+        for (int k = 0; k < 3; k++) {
+            float y0 = p.y + 0.95f + 0.13f * (float)k;
+            mtn_mesh_cylinder(m, m4_identity(), v3(p.x, y0, p.z), v3(p.x, y0 + 0.13f, p.z), 0.08f, 0.08f, 6, k == 1 ? &white : &red, k == 2);
+        }
+    }
+    if (t->trail_len > 2) {
+        vec3 p = t->signpost;
+        mtn_mesh_cylinder(m, m4_identity(), v3(p.x, p.y - 0.3f, p.z), v3(p.x, p.y + 2.5f, p.z), 0.07f, 0.06f, 6, &wood, 1);
+        mtn_material yellow = mtn_mat(mtn_rgb(232, 186, 40), 255, 0, 1.0f);
+        mtn_material text = mtn_mat(mtn_rgb(40, 34, 30), 255, 0, 1.0f);
+        for (int k = 0; k < 2; k++) {
+            float yaw = t->signpost_yaw + (k ? 2.4f : 0.0f);
+            vec3 fwd = v3(sinf(yaw), 0, -cosf(yaw)), side = v3(cosf(yaw), 0, sinf(yaw));
+            vec3 o = v3(p.x, p.y + 2.15f - 0.32f * (float)k, p.z);
+            mat4 xf = m4_from_basis(o, side, v3(0, 1, 0), v3_scale(fwd, -1.0f));
+            mtn_mesh_box(m, xf, v3(-0.03f, -0.11f, 0.05f), v3(0.03f, 0.11f, 0.95f), &yellow, 0x3f);
+            /* the arrow tip and two lines of "writing" */
+            mtn_mesh_box(m, xf, v3(-0.03f, -0.07f, 0.95f), v3(0.03f, 0.07f, 1.05f), &yellow, 0x3f);
+            for (int l = 0; l < 2; l++)
+                for (int sd = 0; sd < 2; sd++) {
+                    float x = sd ? 0.032f : -0.035f;
+                    mtn_mesh_box(m, xf, v3(x, -0.05f + 0.06f * (float)l, 0.15f), v3(x + 0.003f, -0.03f + 0.06f * (float)l, 0.7f - 0.15f * (float)l), &text, 0x3f);
+                }
+        }
     }
 }
 
@@ -525,6 +591,7 @@ static void build_cairns(const mtn_terrain *t, mtn_mesh *m) {
                   v3(s.x - 1.0f, s.y + 3.2f, s.z), &flag, v2(0, 0), v2(1, 1));
     mtn_mesh_quad(m, m4_identity(), v3(s.x + 0.2f, s.y + 2.6f, s.z), v3(s.x - 1.0f, s.y + 2.5f, s.z), v3(s.x - 1.0f, s.y + 3.2f, s.z),
                   v3(s.x + 0.2f, s.y + 3.1f, s.z), &flag, v2(0, 0), v2(1, 1));
+    build_markers(t, m);
 }
 
 static void sync_world(mtn_renderer *r, mtn_game *g) {
