@@ -179,12 +179,37 @@ static void test_house_flow(void) {
     CHECK(g->rooms[0].length > 0);
     CHECK(!mtn_game_summon_house(g));   /* not from inside */
     CHECK(!mtn_game_unsummon_house(g)); /* not from inside */
-    /* walk deeper: rooms are refreshed */
-    g->player.pos = v3(0, 0, MTN_ROOM_LENGTH * 2.5f);
-    int rv = g->rooms_version;
+    /* the cabin and every room within two steps are built */
+    int built = 0;
+    for (int i = 0; i < MTN_MAX_ROOMS; i++) built += g->rooms[i].built;
+    CHECK(built == MTN_MAX_ROOMS);
+    CHECK(mtn_game_room_at(g, v3(0, 0, 4.0f)) && mtn_game_room_at(g, v3(0, 0, 4.0f))->ci == 0);
+    CHECK(!mtn_game_room_at(g, v3(9.0f, 0, -9.0f))); /* between rooms */
+    /* walk deeper: rooms are refreshed around the player, the others are kept */
+    vec3 east = mtn_house_cell_center(&g->house, 1, 0);
+    g->player.pos = east;
+    int rv = g->rooms_version, sv[MTN_MAX_ROOMS];
+    for (int i = 0; i < MTN_MAX_ROOMS; i++) sv[i] = g->room_slot_version[i];
     step(g, 2);
     CHECK(g->rooms_version != rv);
-    CHECK(g->room_base == 1);
+    CHECK(g->room_ci == 1 && g->room_cj == 0);
+    int rebuilt = 0;
+    for (int i = 0; i < MTN_MAX_ROOMS; i++) rebuilt += g->room_slot_version[i] != sv[i];
+    CHECK(rebuilt == 5); /* the diamond moved one step: five new rooms */
+    /* forty rooms away: still thirteen rooms in memory */
+    g->player.pos = mtn_house_cell_center(&g->house, 40, 3);
+    step(g, 2);
+    built = 0;
+    for (int i = 0; i < MTN_MAX_ROOMS; i++) built += g->rooms[i].built && abs(g->rooms[i].ci - 40) + abs(g->rooms[i].cj - 3) <= 2;
+    CHECK(built == MTN_MAX_ROOMS);
+    /* back to the door with one action */
+    CHECK(mtn_game_house_entrance(g));
+    CHECK(g->interior);
+    CHECK_NEAR(g->player.pos.z, 1.5f, 1e-5);
+    CHECK_NEAR(g->player.pos.x, 0, 1e-5);
+    CHECK_NEAR(g->player.yaw, 0, 1e-6); /* facing the front door */
+    step(g, 2);
+    CHECK(g->room_ci == 0 && g->room_cj == 0);
     /* inside, the door can be used from the cabin */
     g->player.pos = v3(0, 0, 1.0f);
     step(g, 2);
@@ -204,6 +229,7 @@ static void test_house_flow(void) {
     }
     mtn_input_set(&g->input, MTN_ACT_FORWARD, 0);
     CHECK(!g->interior);
+    CHECK(!mtn_game_house_entrance(g)); /* only from inside */
     step(g, 10);
     /* far away: summoning again moves the house */
     vec3 far = v3_add(g->house.origin, v3(60, 0, 60));

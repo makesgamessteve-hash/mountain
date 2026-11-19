@@ -22,7 +22,7 @@ function ambience.update(dt)
   local day = time.daylight()
   local _, seasons = time.season()
   local alt = world.altitude(player.altitude())
-  local room = select(2, house.room())
+  local room = house.room()
   water_check = water_check - dt
   if water_check <= 0 then
     water_check = 1.0

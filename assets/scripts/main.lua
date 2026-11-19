@@ -68,7 +68,9 @@ local function close_overlays()
 end
 
 local function house_action()
-  if house.can_unsummon() then
+  if player.inside() then
+    house.entrance() -- back to the front door of the cabin
+  elseif house.can_unsummon() then
     house.unsummon()
   else
     local ok, msg = house.summon()

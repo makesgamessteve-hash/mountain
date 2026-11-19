@@ -50,24 +50,31 @@ test.wait(2)
 -- walk in through the door
 local dx, dy, dz, yaw = house.door_pos()
 local fx, fz = -math.sin(yaw), math.cos(yaw)
-player.set_pos(dx + fx * 1.6, math.max(dy, world.height(dx + fx * 1.6, dz + fz * 1.6)) + 0.05, dz + fz * 1.6)
+player.set_pos(dx + fx * 1.0, math.max(dy, world.height(dx + fx * 1.0, dz + fz * 1.0)) + 0.05, dz + fz * 1.0)
 player.yaw(yaw, 0)
 test.frames(3)
 tap("e")
 test.wait(1.2)
 test.key("w", true); test.wait(1.5); test.key("w", false); test.frames(3)
 test.check(player.inside(), "inside the house")
-local found = false
-for z = 0, 9 * 12, 9 do
-  player.set_pos(0, 0, z + 4.5)
-  test.frames(1)
-  if select(2, house.room()) == "photo gallery" then found = true; break end
+-- find the nearest photo gallery in the grid of rooms
+local found
+for r = 1, 8 do
+  for i = -r, r do
+    for j = -r, r do
+      if not found and math.abs(i) + math.abs(j) == r and house.room_at(i, j).name == "photo gallery" then found = {i, j} end
+    end
+  end
 end
-test.check(found, "found the photo gallery room")
+test.check(found ~= nil, "found a photo gallery room")
 if found then
-  player.set_pos(0, 0, select(3, player.pos()))
-  test.wait(0.1)
-  player.yaw(-math.pi / 2, 0.1)
+  local r = house.room_at(found[1], found[2])
+  player.set_pos(r.x, 0, r.z)
+  test.frames(2)
+  test.check(house.room() == "photo gallery", "standing in the photo gallery")
+  -- photos hang on the back wall, opposite the window
+  local back = {east = -math.pi / 2, west = math.pi / 2, north = 0, south = math.pi}
+  player.yaw(back[r.window_side], 0.1)
   test.frames(4)
   test.screenshot("photo_gallery_room")
 end

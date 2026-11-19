@@ -660,7 +660,9 @@ static void test_portals(void) {
     CHECK_NEAR(in.x, 0, 1e-4);
     CHECK_NEAR(in.y, 1.0f, 1e-4);
     CHECK_NEAR(in.z, 0.2f, 1e-4);
-    CHECK(mtn_house_room_at(in.z) == 0);
+    int ci = 9, cj = 9;
+    mtn_house_cell_at(&h, in, &ci, &cj);
+    CHECK(ci == 0 && cj == 0); /* the cabin's cell */
     /* walking into the house is walking along +z inside */
     vec3 dir = m4_mul_dir(x, v3_scale(h.front, -1.0f));
     CHECK_NEAR(dir.x, 0, 1e-5);
@@ -680,7 +682,7 @@ static void test_portals(void) {
     CHECK_NEAR(rt.y, orig.y, 1e-3);
     CHECK_NEAR(rt.z, orig.z, 1e-3);
 
-    /* windows: room 0 looks out of the side of the house, later rooms at viewpoints */
+    /* windows: the cabin looks out of the front wall beside the door, other rooms at viewpoints */
     t.vp_count = 3;
     for (int i = 0; i < 3; i++) {
         t.vps[i].pos = v3(10.0f + 20.0f * (float)i, 150.0f + (float)i, 30.0f);
@@ -691,39 +693,53 @@ static void test_portals(void) {
     mtn_mesh_init(&b);
     mtn_mesh_init(&c);
     mtn_room r;
-    mtn_house_build_room(&h, &t, 0, &r, &a, &b, &c);
+    mtn_room_type cabin;
+    mtn_room_type_defaults(&cabin);
+    cabin.is_cabin = 1;
+    cabin.width = 9.0f;
+    mtn_house_add_room_type(&h, &cabin);
+    mtn_house_build_room(&h, &t, 0, 0, &r, &a, &b, &c);
     CHECK(r.view == -1);
     vec3 wc = m4_mul_point(r.window_frame, v3(0, 0, 0));
+    CHECK_NEAR(wc.z, 0, 1e-4); /* in the front wall */
+    CHECK(wc.x > 1.0f && wc.x < 3.0f);
     mat4 ww = mtn_house_window_to_world(&h, &t, &r);
     vec3 m0 = m4_mul_point(ww, wc);
-    vec3 side_pt = to_world(&h, 3.0f + 0.3f, 1.9f, 0);
-    CHECK_NEAR(m0.x, side_pt.x, 1e-3);
-    CHECK_NEAR(m0.y, side_pt.y, 1e-3);
-    CHECK_NEAR(m0.z, side_pt.z, 1e-3);
+    vec3 l0 = to_local(&h, m0);
+    CHECK_NEAR(l0.z, 2.5f - 0.15f, 1e-3); /* on the house's front wall */
+    CHECK(fabsf(l0.x) > 1.0f && fabsf(l0.x) < 3.0f);
     vec3 look = m4_mul_dir(ww, m4_mul_dir(r.window_frame, v3(0, 0, 1)));
-    CHECK_NEAR(look.x, h.right.x, 1e-4); /* looking out sideways */
-    CHECK_NEAR(look.z, h.right.z, 1e-4);
-    for (int idx = 1; idx <= 4; idx++) {
-        mtn_house_build_room(&h, &t, idx, &r, &a, &b, &c);
-        CHECK(r.view == (int)(11u % 97u) + idx - 1);
+    CHECK_NEAR(look.x, h.front.x, 1e-4); /* looking out to the front */
+    CHECK_NEAR(look.z, h.front.z, 1e-4);
+    int views = 0;
+    for (int k = 1; k <= 4; k++) {
+        mtn_house_build_room(&h, &t, k, 0, &r, &a, &b, &c);
+        CHECK(r.view >= 0 && r.view < 3);
+        views |= 1 << r.view;
         const mtn_viewpoint *vp = &t.vps[r.view % 3];
         wc = m4_mul_point(r.window_frame, v3(0, 0, 0));
         ww = mtn_house_window_to_world(&h, &t, &r);
         vec3 m = m4_mul_point(ww, wc);
+        float lift = r.balcony ? MTN_BALCONY_LIFT : 0.0f;
         CHECK_NEAR(m.x, vp->pos.x, 1e-3);
-        CHECK_NEAR(m.y, vp->pos.y + 0.2f, 1e-3);
+        CHECK_NEAR(m.y, vp->pos.y + 0.2f + lift, 1e-3);
         CHECK_NEAR(m.z, vp->pos.z, 1e-3);
         look = m4_mul_dir(ww, m4_mul_dir(r.window_frame, v3(0, 0, 1)));
         CHECK_NEAR(look.x, sinf(vp->yaw), 1e-4);
         CHECK_NEAR(look.z, -cosf(vp->yaw), 1e-4);
     }
+    CHECK(views == 7); /* neighbours look at different viewpoints */
     /* without a terrain or viewpoints every window shows the real view */
-    m0 = m4_mul_point(mtn_house_window_to_world(&h, NULL, &r), m4_mul_point(r.window_frame, v3(0, 0, 0)));
-    CHECK_NEAR(m0.x, side_pt.x, 1e-3);
-    CHECK_NEAR(m0.z, side_pt.z, 1e-3);
+    mtn_house_build_room(&h, &t, 0, 0, &r, &a, &b, &c);
+    wc = m4_mul_point(r.window_frame, v3(0, 0, 0));
+    vec3 real = m4_mul_point(mtn_house_window_to_world(&h, &t, &r), wc);
+    mtn_house_build_room(&h, &t, 2, 0, &r, &a, &b, &c);
+    m0 = m4_mul_point(mtn_house_window_to_world(&h, NULL, &r), wc);
+    CHECK_NEAR(m0.x, real.x, 1e-3);
+    CHECK_NEAR(m0.z, real.z, 1e-3);
     t.vp_count = 0;
-    m0 = m4_mul_point(mtn_house_window_to_world(&h, &t, &r), m4_mul_point(r.window_frame, v3(0, 0, 0)));
-    CHECK_NEAR(m0.y, side_pt.y, 1e-3);
+    m0 = m4_mul_point(mtn_house_window_to_world(&h, &t, &r), wc);
+    CHECK_NEAR(m0.y, real.y, 1e-3);
     mtn_mesh_free(&a);
     mtn_mesh_free(&b);
     mtn_mesh_free(&c);
@@ -764,7 +780,7 @@ static void test_exterior_variants(void) {
     CHECK(mx.y > h.floor_y + 5.3f && mx.y <= h.chimney_top.y + 1e-3f); /* chimney is the top */
     CHECK(mn.y < h.floor_y && mn.y > h.floor_y - 1.5f);
     CHECK(mn.x > 64 - 5 && mx.x < 64 + 5);
-    CHECK(count_tile(&gl, 13) == 12); /* three glowing windows */
+    CHECK(count_tile(&gl, 13) == 16); /* four glowing windows, one beside the door */
     CHECK(count_tile(&so, 16) == 24); /* six moss patches in a damp place */
     CHECK(has_color(&so, 5, 235, 228, 215)); /* forest stone */
     counts[MTN_HV_COTTAGE] = so.vcount;
@@ -940,11 +956,11 @@ static void test_generated_terrain(void) {
         mtn_mesh_init(&so);
         mtn_mesh_init(&sp);
         mtn_mesh_init(&gl);
-        mtn_house_build_room(&h, &t, 2, &r, &so, &sp, &gl);
+        mtn_house_build_room(&h, &t, 2, 0, &r, &so, &sp, &gl);
         mat4 ww = mtn_house_window_to_world(&h, &t, &r);
         vec3 m = m4_mul_point(ww, m4_mul_point(r.window_frame, v3(0, 0, 0)));
         const mtn_viewpoint *vp = &t.vps[r.view % t.vp_count];
-        CHECK_NEAR(v3_dist(m, v3_add(vp->pos, v3(0, 0.2f, 0))), 0, 0.05);
+        CHECK_NEAR(v3_dist(m, v3_add(vp->pos, v3(0, 0.2f + (r.balcony ? MTN_BALCONY_LIFT : 0.0f), 0))), 0, 0.05);
         free3(&so, &sp, &gl);
     }
     CHECK(found >= 1);

@@ -40,9 +40,10 @@ flora.species{ name = "lavender field", kind = "ground", tiles = {20}, bloom = {
 world.generate(world.seed())   -- plants are placed when the world is generated
 
 -- a room for the magic house
-house.define_room{ name = "reading nook", width = 6, height = 3.2, light = {1, 0.8, 0.6},
-  items = { {"armchair", x = 1.5, z = 4, rot = -90}, {"bookshelf", x = -2.75, z = 4.5, rot = 90},
-            {"lamp", x = 2.3, z = 5.5}, {"rug", x = 0, z = 4.5, arg = 3} } }
+house.define_room{ name = "reading nook", width = {5, 6}, length = {5, 7}, height = 3.2, balcony = 0.5,
+  light = {1, 0.8, 0.6},
+  items = { {"armchair", fx = 0.4, z = 1.0, rot = -60}, {"bookshelf", wall = "back", along = 0.6, inset = 0.22},
+            {"lamp", fx = 0.8, fz = 0.8}, {"rug", x = 0, z = 0, arg = 3} } }
 
 -- greet the player when they reach the summit
 local greeted = false
@@ -172,9 +173,25 @@ end
 | `house.door_pos()` | `x, y, z, yaw` of the door (yaw looks at it from outside) |
 | `house.distance()` | distance to the house and to its door (`nil` without a house) |
 | `house.can_unsummon()` | whether `unsummon` would work now |
-| `house.room()` | room index and type name while inside (`-1` outside) |
+| `house.room()` | inside: `name, column, row, balcony` of the room the player is in (the cabin is column 0, row 0; east is +column, north +row); `nil` outside |
+| `house.room_at(column, row)` | the plan of any room of the endless grid: table `name width length height window_side balcony x z doors` (`window_side` and `doors` are `east west north south`; `x, z` the centre in interior space) |
+| `house.entrance()` | inside: back to the cabin, just inside the front door and facing it; `false` outside |
 | `house.clear_rooms()` | remove all room types |
-| `house.define_room{...}` | `name`, `cabin` (the main room), `width`, `height`, `wall_tile`, `floor_tile`, `wall_color`, `floor_color`, `light`, `weight`, `items = {{"prefab", x=, z=, rot=, scale=, arg=}, ...}`; prefabs: `bed kitchen desk bookshelf fireplace armchair rug plant lamp table chair tea_table bathtub piano telescope planter chest candles photo star_chart window_seat barrel basket` |
+| `house.define_room{...}` | `name`, `cabin` (the main room), `width` (across, towards the window) and `length` (along the window wall) as a number or `{min, max}` in metres (4..13), `height`, `balcony` (chance 0..1, or `true`), `wall_tile`, `floor_tile`, `wall_color`, `floor_color`, `light`, `weight`, `items` (see below) |
+
+Rooms form an endless grid of 18 m cells joined by corridors. Each room has doorways
+in the middle of three walls; the fourth (room-local +x) holds the big window or the
+balcony door, in the cabin the front door. Items: `{"prefab", x=, z=}` in metres from
+the room centre, or `fx=, fz=` as fractions of the half width/length, or against a
+wall: `wall = "window" | "back" | "right" | "left"` with `along` (-1..1 of the wall's
+half length), `at` (metres along) and `inset` (distance from the wall); wall items
+face into the room and `rot` (degrees) is added. Also `scale` and `arg`. Items in
+front of a doorway are skipped. Prefabs: `bed kitchen desk bookshelf fireplace
+armchair rug plant lamp table chair tea_table bathtub piano telescope planter chest
+candles photo star_chart window_seat barrel basket sauna_stove sauna_bench bucket
+long_table sofa wardrobe dresser workbench tool_rack globe chandelier` (`rug`: `arg`
+is the size in half metres; `photo`: `arg` is the photo, 0 = newest; `chandelier`:
+`arg` is the height in decimetres).
 
 ## camera and photos
 

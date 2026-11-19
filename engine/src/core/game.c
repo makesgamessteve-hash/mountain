@@ -22,7 +22,7 @@ void mtn_game_init(mtn_game *g, const char *platform, const char *user_dir) {
     mtn_touch_init(&g->touch);
     mtn_ui_init(&g->ui);
     mtn_mixer_init(&g->mixer, 44100);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < MTN_MAX_ROOMS; i++) {
         mtn_mesh_init(&g->room_solid[i]);
         mtn_mesh_init(&g->room_sprites[i]);
         mtn_mesh_init(&g->room_glow[i]);
@@ -49,7 +49,7 @@ void mtn_game_shutdown(mtn_game *g) {
     mtn_flora_free(&g->flora);
     mtn_ui_free(&g->ui);
     mtn_mixer_free(&g->mixer);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < MTN_MAX_ROOMS; i++) {
         mtn_mesh_free(&g->room_solid[i]);
         mtn_mesh_free(&g->room_sprites[i]);
         mtn_mesh_free(&g->room_glow[i]);
@@ -255,40 +255,71 @@ static int interior_push(void *ctx, vec3 *pos, float radius, float height) {
     mtn_game *g = ctx;
     (void)height;
     int hit = 0;
-    for (int i = 0; i < 3; i++) hit |= mtn_room_collide(&g->rooms[i], pos, radius);
+    for (int i = 0; i < MTN_MAX_ROOMS; i++)
+        if (g->rooms[i].built) hit |= mtn_room_collide(&g->rooms[i], pos, radius);
     /* the front door: closed it is a wall, open it lets you out */
     float dw = MTN_DOOR_WIDTH * 0.5f;
     int open = g->house.door_open && g->house.door_angle > 0.8f;
-    if (pos->z < radius && fabsf(pos->x) < dw + radius && (!open || fabsf(pos->x) > dw - 0.05f)) {
-        if (pos->z > -0.5f) {
-            pos->z = radius;
-            hit = 1;
-        }
+    if (pos->z < radius && pos->z > -0.5f && fabsf(pos->x) < dw + radius && (!open || fabsf(pos->x) > dw - 0.05f)) {
+        pos->z = radius;
+        hit = 1;
     }
     return hit;
 }
 
+const mtn_room *mtn_game_room_at(const mtn_game *g, vec3 p) {
+    for (int i = 0; i < MTN_MAX_ROOMS; i++)
+        if (g->rooms[i].built && mtn_room_contains(&g->rooms[i], p)) return &g->rooms[i];
+    return NULL;
+}
+
 static int interior_walkable(void *ctx, float x, float z) {
     mtn_game *g = ctx;
-    vec3 p = v3(x, 0, z);
-    for (int i = 0; i < 3; i++)
-        if (g->rooms[i].length > 0 && mtn_room_contains(&g->rooms[i], p)) return 1;
-    return z < 0.5f && fabsf(x) < MTN_DOOR_WIDTH * 0.5f; /* stepping out of the front door */
+    if (mtn_game_room_at(g, v3(x, 0, z))) return 1;
+    return z < 0.5f && z > -1.0f && fabsf(x) < MTN_DOOR_WIDTH * 0.5f; /* stepping out of the front door */
 }
 
 /* ------------------------------------------------------------------ house */
 
 void mtn_game_refresh_rooms(mtn_game *g, int force) {
-    int cur = mtn_house_room_at(g->interior ? g->player.pos.z : 0.0f);
-    int base = cur > 0 ? cur - 1 : 0;
-    if (!force && base == g->room_base && g->rooms[0].length > 0) return;
-    g->room_base = base;
-    for (int i = 0; i < 3; i++) {
-        mtn_mesh_clear(&g->room_solid[i]);
-        mtn_mesh_clear(&g->room_sprites[i]);
-        mtn_mesh_clear(&g->room_glow[i]);
-        mtn_house_build_room(&g->house, &g->terrain, base + i, &g->rooms[i], &g->room_solid[i], &g->room_sprites[i],
-                             &g->room_glow[i]);
+    int ci = 0, cj = 0;
+    if (g->interior) mtn_house_cell_at(&g->house, g->player.pos, &ci, &cj);
+    int any = 0;
+    for (int i = 0; i < MTN_MAX_ROOMS; i++) any |= g->rooms[i].built;
+    if (!force && any && ci == g->room_ci && cj == g->room_cj) return;
+    g->room_ci = ci;
+    g->room_cj = cj;
+    /* the cells within two steps; keep the rooms already built there */
+    int need[MTN_MAX_ROOMS][2], nn = 0, have[MTN_MAX_ROOMS] = {0};
+    for (int dj = -2; dj <= 2; dj++)
+        for (int di = -2; di <= 2; di++)
+            if (abs(di) + abs(dj) <= 2) {
+                need[nn][0] = ci + di;
+                need[nn][1] = cj + dj;
+                nn++;
+            }
+    int keep[MTN_MAX_ROOMS] = {0};
+    for (int s = 0; s < MTN_MAX_ROOMS && !force; s++) {
+        if (!g->rooms[s].built) continue;
+        for (int k = 0; k < nn; k++)
+            if (!have[k] && g->rooms[s].ci == need[k][0] && g->rooms[s].cj == need[k][1]) {
+                have[k] = 1;
+                keep[s] = 1;
+                break;
+            }
+    }
+    for (int k = 0; k < nn; k++) {
+        if (have[k]) continue;
+        int s = 0;
+        while (s < MTN_MAX_ROOMS && keep[s]) s++;
+        if (s >= MTN_MAX_ROOMS) break;
+        keep[s] = 1;
+        mtn_mesh_clear(&g->room_solid[s]);
+        mtn_mesh_clear(&g->room_sprites[s]);
+        mtn_mesh_clear(&g->room_glow[s]);
+        mtn_house_build_room(&g->house, &g->terrain, need[k][0], need[k][1], &g->rooms[s], &g->room_solid[s], &g->room_sprites[s],
+                             &g->room_glow[s]);
+        g->room_slot_version[s]++;
     }
     g->rooms_version++;
 }
@@ -315,7 +346,6 @@ int mtn_game_summon_house(mtn_game *g) {
     mtn_house_summon(&g->house, &site, seed);
     mtn_flora_hide_radius(&g->flora, site.pos, 6.5f, site.variant == MTN_HV_TREE ? site.tree : -1);
     rebuild_house_meshes(g);
-    g->room_base = -1;
     mtn_game_refresh_rooms(g, 1);
     mtn_game_play(g, "summon", 0.8f);
     return 1;
@@ -344,6 +374,17 @@ int mtn_game_interact(mtn_game *g) {
     if (d > 3.0f) return 0;
     mtn_house_toggle_door(&g->house);
     mtn_game_play(g, g->house.door_open ? "door_open" : "door_close", 0.7f);
+    return 1;
+}
+
+int mtn_game_house_entrance(mtn_game *g) {
+    if (!g->interior) return 0;
+    g->player.pos = v3(0, 0, 1.5f);
+    g->player.vel = v3(0, 0, 0);
+    g->player.yaw = 0.0f; /* facing -z: the front door */
+    g->player.pitch = 0.0f;
+    mtn_game_refresh_rooms(g, 0);
+    mtn_game_play(g, "summon", 0.4f);
     return 1;
 }
 
@@ -456,7 +497,8 @@ void mtn_game_update(mtn_game *g, float dt) {
             soft_boundary(g, prev);
             if (mtn_house_crossed_in(&g->house, prev, g->player.pos)) enter_house(g);
         } else {
-            if (g->player.pos.z < -0.25f && g->house.door_open) leave_house(g);
+            vec3 p = g->player.pos;
+            if (g->house.door_open && prev.z >= -0.25f && p.z < -0.25f && fabsf(p.x) < MTN_DOOR_WIDTH * 0.5f + 0.2f) leave_house(g);
             else mtn_game_refresh_rooms(g, 0);
         }
         if (g->player.footstep) footstep(g);

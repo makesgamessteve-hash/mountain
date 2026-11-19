@@ -34,9 +34,12 @@ local function prompts()
   local open = house.door()
   local p
   if player.inside() then
-    local idx, name = house.room()
-    centered(20, util.capitalize(name or "room") .. (idx and idx > 0 and ("  -  room " .. idx) or ""), GOLD)
-    if door and door < 2.5 then p = open and "E: close the door" or "E: open the door" end
+    local name, ci, cj, balcony = house.room()
+    local steps = ci and (math.abs(ci) + math.abs(cj)) or 0
+    local where = steps == 0 and "" or ("  -  " .. steps .. (steps == 1 and " room" or " rooms") .. " from the door")
+    centered(20, util.capitalize(name or "room") .. (balcony and " with a balcony" or "") .. where, GOLD)
+    if door and door < 2.5 then p = open and "E: close the door" or "E: open the door"
+    elseif steps > 0 then p = touch and nil or "H: back to the door" end
   elseif dist then
     if door and door < 3 then p = open and "E: close the door - walk in" or "E: open the door"
     elseif house.can_unsummon() then p = "H: send the house away" end
@@ -55,7 +58,7 @@ local function help(state)
   local w = ui.size()
   local lines = {
     "WASD walk  Shift run  Space jump  mouse look",
-    "H summon the magic house   E open its door",
+    "H magic house, back to the door   E door",
     "C camera (wheel zoom, F filter, click shoot)",
     "G photo gallery   Esc menu   F11 fullscreen",
   }
@@ -124,7 +127,9 @@ local function menu(state)
   if ui.button("vol-", x + 70, by, 24, 18, "-") then engine.settings{ volume = st.volume - 0.1 }; save_settings() end
   ui.text(x + 100, by + 5, string.format("%d%%", math.floor(st.volume * 100 + 0.5)), WHITE)
   if ui.button("vol+", x + 140, by, 24, 18, "+") then engine.settings{ volume = st.volume + 0.1 }; save_settings() end
-  if ui.button("trail", x + 176, by, 114, 18, "To trailhead", 34) then player.trailhead(); state.menu = false; ui.modal(false) end
+  if player.inside() then
+    if ui.button("entrance", x + 176, by, 114, 18, "To the door", 1) then house.entrance(); state.menu = false; ui.modal(false) end
+  elseif ui.button("trail", x + 176, by, 114, 18, "To trailhead", 34) then player.trailhead(); state.menu = false; ui.modal(false) end
   by = by + 24
   local supported = engine.xr()
   if supported then ui.text(x + 10, by + 5, "VR: use the Enter VR button", GOLD) end

@@ -588,24 +588,99 @@ static int l_house_can_unsummon(lua_State *L) {
     lua_pushboolean(L, !g_game->interior && mtn_house_can_unsummon(&g_game->house, g_game->player.pos));
     return 1;
 }
+/* house.room(): name, column, row, balcony of the room the player is in (nil outside) */
 static int l_house_room(lua_State *L) {
-    int idx = g_game->interior ? mtn_house_room_at(g_game->player.pos.z) : -1;
-    lua_pushinteger(L, idx);
-    if (idx >= 0) {
-        int t = mtn_house_room_type_for(&g_game->house, idx);
-        lua_pushstring(L, t >= 0 ? g_game->house.types[t].name : "room");
-        return 2;
+    if (!g_game->interior) return 0;
+    const mtn_room *r = mtn_game_room_at(g_game, g_game->player.pos);
+    int ci, cj;
+    mtn_house_cell_at(&g_game->house, g_game->player.pos, &ci, &cj);
+    if (r) {
+        ci = r->ci;
+        cj = r->cj;
     }
+    int t = mtn_house_room_type_at(&g_game->house, ci, cj);
+    lua_pushstring(L, t >= 0 ? g_game->house.types[t].name : "room");
+    lua_pushinteger(L, ci);
+    lua_pushinteger(L, cj);
+    mtn_room_plan p;
+    mtn_house_room_plan(&g_game->house, ci, cj, &p);
+    lua_pushboolean(L, p.balcony);
+    return 4;
+}
+
+/* house.room_at(column, row): the plan of any room of the grid */
+static int l_house_room_at(lua_State *L) {
+    mtn_room_plan p;
+    mtn_house_room_plan(&g_game->house, (int)luaL_checkinteger(L, 1), (int)luaL_checkinteger(L, 2), &p);
+    lua_newtable(L);
+    lua_pushstring(L, p.type >= 0 ? g_game->house.types[p.type].name : "room"); lua_setfield(L, -2, "name");
+    lua_pushnumber(L, p.width); lua_setfield(L, -2, "width");
+    lua_pushnumber(L, p.length); lua_setfield(L, -2, "length");
+    lua_pushnumber(L, p.height); lua_setfield(L, -2, "height");
+    lua_pushstring(L, mtn_side_name(p.closed)); lua_setfield(L, -2, "window_side");
+    lua_pushboolean(L, p.balcony); lua_setfield(L, -2, "balcony");
+    lua_pushnumber(L, p.center.x); lua_setfield(L, -2, "x");
+    lua_pushnumber(L, p.center.z); lua_setfield(L, -2, "z");
+    lua_newtable(L);
+    int n = 0;
+    for (int sd = 0; sd < 4; sd++)
+        if (sd != p.closed) {
+            lua_pushstring(L, mtn_side_name(sd));
+            lua_rawseti(L, -2, ++n);
+        }
+    lua_setfield(L, -2, "doors");
     return 1;
 }
+
+static int l_house_entrance(lua_State *L) {
+    lua_pushboolean(L, mtn_game_house_entrance(g_game));
+    return 1;
+}
+
 static int l_house_clear_rooms(lua_State *L) { (void)L; g_game->house.type_count = 0; return 0; }
+
+/* a number or a {min, max} pair */
+static void frange(lua_State *L, int t, const char *k, float *lo, float *hi) {
+    lua_getfield(L, t, k);
+    if (lua_isnumber(L, -1)) {
+        *lo = *hi = (float)lua_tonumber(L, -1);
+    } else if (lua_istable(L, -1)) {
+        lua_rawgeti(L, -1, 1);
+        lua_rawgeti(L, -2, 2);
+        if (lua_isnumber(L, -2)) *lo = (float)lua_tonumber(L, -2);
+        *hi = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : *lo;
+        lua_pop(L, 2);
+    }
+    lua_pop(L, 1);
+}
+
+static int wall_from(lua_State *L, int t) {
+    static const char *names[4] = {"window", "back", "right", "left"};
+    char w[16] = "";
+    fstr(L, t, "wall", w, sizeof w);
+    for (int i = 0; i < 4; i++)
+        if (strcmp(w, names[i]) == 0) return i;
+    return MTN_WALL_NONE;
+}
+
 static int l_house_define_room(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
     mtn_room_type t;
     mtn_room_type_defaults(&t);
     fstr(L, 1, "name", t.name, sizeof t.name);
-    t.width = mtn_clampf(fnum(L, 1, "width", t.width), 4.0f, 16.0f);
-    t.height = mtn_clampf(fnum(L, 1, "height", t.height), 3.0f, 8.0f);
+    t.width_min = t.width_max = t.width;
+    frange(L, 1, "width", &t.width_min, &t.width_max);
+    t.length_min = t.length_max = 9.0f;
+    frange(L, 1, "length", &t.length_min, &t.length_max);
+    t.width_min = mtn_clampf(t.width_min, MTN_ROOM_MIN_SIZE, MTN_ROOM_MAX_SIZE);
+    t.width_max = mtn_clampf(t.width_max, t.width_min, MTN_ROOM_MAX_SIZE);
+    t.length_min = mtn_clampf(t.length_min, MTN_ROOM_MIN_SIZE, MTN_ROOM_MAX_SIZE);
+    t.length_max = mtn_clampf(t.length_max, t.length_min, MTN_ROOM_MAX_SIZE);
+    t.width = t.width_min;
+    t.height = mtn_clampf(fnum(L, 1, "height", t.height), 2.6f, 8.0f);
+    lua_getfield(L, 1, "balcony");
+    t.balcony = lua_isboolean(L, -1) ? (lua_toboolean(L, -1) ? 1.0f : 0.0f) : mtn_clampf((float)luaL_optnumber(L, -1, 0), 0, 1);
+    lua_pop(L, 1);
     t.wall_tile = fint(L, 1, "wall_tile", t.wall_tile);
     t.floor_tile = fint(L, 1, "floor_tile", t.floor_tile);
     vec3 wc = fcolor(L, 1, "wall_color", v3(1, 1, 1)), fc = fcolor(L, 1, "floor_color", v3(1, 1, 1));
@@ -620,13 +695,24 @@ static int l_house_define_room(lua_State *L) {
         for (int i = 1; i <= n; i++) {
             lua_rawgeti(L, -1, i);
             int it = lua_gettop(L);
-            char pre[24] = "";
+            mtn_room_item item;
+            mtn_room_item_defaults(&item);
             lua_rawgeti(L, it, 1);
-            if (lua_isstring(L, -1)) snprintf(pre, sizeof pre, "%s", lua_tostring(L, -1));
+            if (lua_isstring(L, -1)) snprintf(item.prefab, sizeof item.prefab, "%s", lua_tostring(L, -1));
             lua_pop(L, 1);
-            fstr(L, it, "prefab", pre, sizeof pre);
-            mtn_room_add_item(&t, pre, fnum(L, it, "x", 0), fnum(L, it, "z", 0), fnum(L, it, "rot", 0), fnum(L, it, "scale", 1),
-                              fint(L, it, "arg", 0));
+            fstr(L, it, "prefab", item.prefab, sizeof item.prefab);
+            item.x = fnum(L, it, "x", 0);
+            item.z = fnum(L, it, "z", 0);
+            item.fx = fnum(L, it, "fx", 0);
+            item.fz = fnum(L, it, "fz", 0);
+            item.wall = wall_from(L, it);
+            item.along = fnum(L, it, "along", 0);
+            item.at = fnum(L, it, "at", 0);
+            item.inset = fnum(L, it, "inset", 0.5f);
+            item.rot = fnum(L, it, "rot", 0);
+            item.scale = fnum(L, it, "scale", 1);
+            item.arg = fint(L, it, "arg", 0);
+            mtn_room_add_item_ex(&t, &item);
             lua_pop(L, 1);
         }
     }
@@ -884,7 +970,8 @@ static void open_api(lua_State *L) {
         {"altitude", l_player_altitude}, {"speeds", l_player_speeds}, {NULL, NULL}};
     static const luaL_Reg house[] = {{"summon", l_house_summon}, {"unsummon", l_house_unsummon}, {"exists", l_house_exists},
         {"state", l_house_state}, {"interact", l_house_interact}, {"door", l_house_door}, {"distance", l_house_distance},
-        {"can_unsummon", l_house_can_unsummon}, {"door_pos", l_house_door_pos}, {"room", l_house_room}, {"clear_rooms", l_house_clear_rooms},
+        {"can_unsummon", l_house_can_unsummon}, {"door_pos", l_house_door_pos}, {"room", l_house_room}, {"room_at", l_house_room_at}, {"entrance", l_house_entrance},
+        {"clear_rooms", l_house_clear_rooms},
         {"define_room", l_house_define_room}, {NULL, NULL}};
     static const luaL_Reg camera[] = {{"mode", l_camera_mode}, {"fov", l_camera_fov}, {"filter", l_camera_filter},
         {"shoot", l_camera_shoot}, {NULL, NULL}};

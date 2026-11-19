@@ -7,9 +7,18 @@
 #include "mtn/mesh.h"
 #include "mtn/terrain.h"
 
-#define MTN_MAX_ROOM_TYPES 16
-#define MTN_MAX_ROOM_ITEMS 40
-#define MTN_ROOM_LENGTH 9.0f
+#define MTN_MAX_ROOM_TYPES 24
+#define MTN_MAX_ROOM_ITEMS 48
+#define MTN_ROOM_CELL 18.0f      /* the rooms sit on a grid of 18 m cells */
+#define MTN_ROOM_MAX_SIZE 13.0f  /* so corridors are at least 5 m long */
+#define MTN_ROOM_MIN_SIZE 4.0f
+#define MTN_MAX_ROOMS 13         /* the current room and every room within two steps */
+#define MTN_CORRIDOR_HALF 0.8f
+#define MTN_CORRIDOR_HEIGHT 2.5f
+#define MTN_BALCONY_DEPTH 2.0f
+#define MTN_BALCONY_LIFT 8.0f    /* balconies hang this high above their viewpoint */
+#define MTN_ROOM_MAX_COLLIDERS 128
+#define MTN_ROOM_MAX_WALK 8
 #define MTN_DOOR_WIDTH 1.1f
 #define MTN_DOOR_HEIGHT 2.1f
 #define MTN_HOUSE_UNSUMMON_DIST 25.0f
@@ -35,15 +44,28 @@ typedef struct {
 
 typedef struct { vec3 mn, mx; } mtn_aabb;
 
+/* grid directions in interior space */
+enum { MTN_SIDE_EAST = 0, MTN_SIDE_WEST, MTN_SIDE_NORTH, MTN_SIDE_SOUTH };
+/* room walls in room-local space: +x is always the window (or balcony, or front door) side */
+enum { MTN_WALL_NONE = -1, MTN_WALL_WINDOW = 0, MTN_WALL_BACK, MTN_WALL_RIGHT, MTN_WALL_LEFT };
+
 typedef struct {
     char prefab[24];
-    float x, z, rot, scale;
+    float x, z;        /* metres from the room centre (+x towards the window) */
+    float fx, fz;      /* plus fractions of the half width / half length */
+    int wall;          /* MTN_WALL_*: stand against this wall, facing into the room */
+    float along, at;   /* along the wall: fraction of its half length plus metres */
+    float inset;       /* distance of the item's origin from the wall */
+    float rot, scale;  /* rot: degrees (added to the wall's facing) */
     int arg;
 } mtn_room_item;
 
 typedef struct {
     char name[32];
-    float width, height;
+    float width, height;             /* width: towards the window; height of the ceiling */
+    float width_min, width_max;      /* each room of this type gets a size in these ranges */
+    float length_min, length_max;    /* length: along the window wall */
+    float balcony;                   /* chance that a room of this type has a balcony */
     int wall_tile, floor_tile;
     uint32_t wall_color, floor_color;
     vec3 light_color;
@@ -56,14 +78,32 @@ typedef struct {
 typedef struct { vec3 pos; vec3 color; float radius; float flicker; } mtn_light;
 typedef struct { vec3 center, right, up; int photo; } mtn_photo_slot;
 
+/* The plan of one grid cell: cheap to compute, the same for the same house and cell. */
 typedef struct {
-    int index;
+    int ci, cj;
     int type;
-    float z0, length, width, height;
+    int closed;          /* MTN_SIDE_* of the window / balcony side (the cabin: the front door side) */
+    int balcony;
+    float width, length, height;
+    vec3 center;         /* centre of the floor in interior space */
+    mat4 xf;             /* room-local -> interior space */
+} mtn_room_plan;
+
+typedef struct {
+    int built;
+    int ci, cj;
+    int type;
+    int closed, balcony;
+    float width, length, height;
+    vec3 center;
+    mat4 xf;
     mat4 window_frame;   /* portal frame in interior space (forward = out through the glass) */
     vec3 window_size;    /* half width, half height */
     int view;            /* -1 real view from the house, otherwise viewpoint index */
-    mtn_aabb colliders[96];
+    vec3 balcony_quads[5][4]; /* the box of view around a balcony, facing inwards */
+    mtn_aabb walk[MTN_ROOM_MAX_WALK]; /* floor areas: the room, its corridors, the balcony */
+    int walk_count;
+    mtn_aabb colliders[MTN_ROOM_MAX_COLLIDERS];
     int collider_count;
     mtn_light lights[8];
     int light_count;
@@ -100,6 +140,8 @@ void mtn_house_init(mtn_house *h);
 void mtn_room_type_defaults(mtn_room_type *t);
 int mtn_house_add_room_type(mtn_house *h, const mtn_room_type *t);
 int mtn_room_add_item(mtn_room_type *t, const char *prefab, float x, float z, float rot, float scale, int arg);
+int mtn_room_add_item_ex(mtn_room_type *t, const mtn_room_item *it);
+void mtn_room_item_defaults(mtn_room_item *it);
 const char *mtn_house_variant_name(int v);
 
 int mtn_house_find_site(const mtn_terrain *t, const mtn_flora *f, vec3 player, float yaw, mtn_house_site *out);
@@ -134,12 +176,16 @@ void mtn_house_build_exterior(const mtn_house *h, const mtn_terrain *t, const mt
 void mtn_house_build_door(mtn_mesh *m);
 mat4 mtn_house_door_model(const mtn_house *h, int interior);
 
-/* interior */
-int mtn_house_room_type_for(const mtn_house *h, int index);
-int mtn_house_room_at(float z);
-void mtn_house_build_room(const mtn_house *h, const mtn_terrain *t, int index, mtn_room *info, mtn_mesh *solid,
+/* interior: an endless grid of rooms */
+int mtn_house_room_type_at(const mtn_house *h, int ci, int cj);
+int mtn_house_closed_side(const mtn_house *h, int ci, int cj);
+void mtn_house_room_plan(const mtn_house *h, int ci, int cj, mtn_room_plan *p);
+vec3 mtn_house_cell_center(const mtn_house *h, int ci, int cj);
+void mtn_house_cell_at(const mtn_house *h, vec3 p, int *ci, int *cj);
+const char *mtn_side_name(int side);
+void mtn_house_build_room(const mtn_house *h, const mtn_terrain *t, int ci, int cj, mtn_room *info, mtn_mesh *solid,
                           mtn_mesh *sprites, mtn_mesh *glow);
-int mtn_room_collide(const mtn_room *r, vec3 *pos, float radius);
 int mtn_room_contains(const mtn_room *r, vec3 p);
+int mtn_room_collide(const mtn_room *r, vec3 *pos, float radius);
 
 #endif

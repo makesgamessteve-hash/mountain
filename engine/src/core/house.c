@@ -42,16 +42,33 @@ int mtn_house_add_room_type(mtn_house *h, const mtn_room_type *t) {
     return h->type_count++;
 }
 
-int mtn_room_add_item(mtn_room_type *t, const char *prefab, float x, float z, float rot, float scale, int arg) {
+void mtn_room_item_defaults(mtn_room_item *it) {
+    memset(it, 0, sizeof *it);
+    it->wall = MTN_WALL_NONE;
+    it->inset = 0.5f;
+    it->scale = 1.0f;
+}
+
+int mtn_room_add_item_ex(mtn_room_type *t, const mtn_room_item *src) {
     if (t->item_count >= MTN_MAX_ROOM_ITEMS) return -1;
     mtn_room_item *it = &t->items[t->item_count];
-    snprintf(it->prefab, sizeof it->prefab, "%s", prefab);
-    it->x = x;
-    it->z = z;
-    it->rot = rot;
-    it->scale = scale > 0.0f ? scale : 1.0f;
-    it->arg = arg;
+    *it = *src;
+    it->prefab[sizeof it->prefab - 1] = 0;
+    if (it->scale <= 0.0f) it->scale = 1.0f;
+    if (it->wall < MTN_WALL_NONE || it->wall > MTN_WALL_LEFT) it->wall = MTN_WALL_NONE;
     return t->item_count++;
+}
+
+int mtn_room_add_item(mtn_room_type *t, const char *prefab, float x, float z, float rot, float scale, int arg) {
+    mtn_room_item it;
+    mtn_room_item_defaults(&it);
+    snprintf(it.prefab, sizeof it.prefab, "%s", prefab);
+    it.x = x;
+    it.z = z;
+    it.rot = rot;
+    it.scale = scale;
+    it.arg = arg;
+    return mtn_room_add_item_ex(t, &it);
 }
 
 const char *mtn_house_variant_name(int v) {
@@ -391,15 +408,12 @@ mat4 mtn_house_ext_to_int(const mtn_house *h) {
 }
 
 mat4 mtn_house_window_to_world(const mtn_house *h, const mtn_terrain *t, const mtn_room *r) {
-    mat4 target;
-    if (r->view < 0 || !t || t->vp_count == 0) {
-        vec3 o = m4_mul_point(h->frame, v3(h->width * 0.5f + 0.3f, 1.9f, 0.0f));
-        target = mtn_portal_frame(o, v3_scale(h->right, -1.0f));
-    } else {
-        const mtn_viewpoint *vp = &t->vps[r->view % t->vp_count];
-        vec3 dir = v3(sinf(vp->yaw), 0, -cosf(vp->yaw));
-        target = mtn_portal_frame(v3_add(vp->pos, v3(0, 0.2f, 0)), v3_scale(dir, -1.0f));
-    }
+    /* the cabin's window is in the front wall beside the door: it maps like the door */
+    if (r->view < 0 || !t || t->vp_count == 0) return m4_inverse(mtn_house_ext_to_int(h));
+    const mtn_viewpoint *vp = &t->vps[r->view % t->vp_count];
+    vec3 dir = v3(sinf(vp->yaw), 0, -cosf(vp->yaw));
+    float lift = 0.2f + (r->balcony ? MTN_BALCONY_LIFT : 0.0f);
+    mat4 target = mtn_portal_frame(v3_add(vp->pos, v3(0, lift, 0)), v3_scale(dir, -1.0f));
     return mtn_portal_transform(r->window_frame, target);
 }
 
@@ -554,6 +568,13 @@ void mtn_house_build_exterior(const mtn_house *h, const mtn_terrain *t, const mt
          WHITE, 13, MTN_VF_EMISSIVE | MTN_VF_ABS_UV, v2(1, 1));
     quad(&g, v3(0.7f, 1.0f, -hd - 0.01f), v3(-0.7f, 1.0f, -hd - 0.01f), v3(-0.7f, 2.0f, -hd - 0.01f), v3(0.7f, 2.0f, -hd - 0.01f),
          WHITE, 13, MTN_VF_EMISSIVE | MTN_VF_ABS_UV, v2(1, 1));
+    { /* the front window beside the door, where the cabin's window looks out */
+        vec3 wc = m4_mul_point(h->inv_frame, m4_mul_point(m4_inverse(mtn_house_ext_to_int(h)), v3(2.0f, 1.55f, 0.0f)));
+        float x0 = wc.x - 0.7f, x1 = wc.x + 0.7f, z = hd + 0.01f;
+        quad(&g, v3(x0, 0.9f, z), v3(x1, 0.9f, z), v3(x1, 2.2f, z), v3(x0, 2.2f, z), WHITE, 13, MTN_VF_EMISSIVE | MTN_VF_ABS_UV, v2(1, 1));
+        box(&b, v3(x0 - 0.1f, 0.82f, hd), v3(x1 + 0.1f, 0.9f, hd + 0.18f), mtn_rgb(120, 85, 58), NO_TEXTURE, MTN_VF_SNOW, 1.0f);
+        box(&b, v3(x0 - 0.1f, 2.2f, hd), v3(x1 + 0.1f, 2.3f, hd + 0.08f), mtn_rgb(120, 85, 58), NO_TEXTURE, MTN_VF_SNOW, 1.0f);
+    }
     /* window sills and shutters */
     box(&b, v3(hw, 0.82f, -1.2f), v3(hw + 0.18f, 0.9f, 1.2f), mtn_rgb(120, 85, 58), NO_TEXTURE, MTN_VF_SNOW, 1.0f);
     box(&b, v3(-hw - 0.18f, 0.82f, -0.9f), v3(-hw, 0.9f, 0.9f), mtn_rgb(120, 85, 58), NO_TEXTURE, MTN_VF_SNOW, 1.0f);

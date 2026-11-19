@@ -53,10 +53,11 @@ typedef struct mtn_game {
     /* player and house */
     mtn_player player;
     mtn_house house;
-    mtn_room rooms[3];       /* current room and its neighbours */
-    int room_base;           /* index of rooms[0] */
-    int rooms_version;
-    mtn_mesh room_solid[3], room_sprites[3], room_glow[3];
+    mtn_room rooms[MTN_MAX_ROOMS]; /* the current room and every room within two steps */
+    int room_ci, room_cj;          /* the cell the rooms are built around */
+    int rooms_version;             /* changes whenever a slot is rebuilt */
+    int room_slot_version[MTN_MAX_ROOMS];
+    mtn_mesh room_solid[MTN_MAX_ROOMS], room_sprites[MTN_MAX_ROOMS], room_glow[MTN_MAX_ROOMS];
     mtn_mesh house_solid, house_sprites, house_glow, door_mesh;
     int house_mesh_version;  /* bumped when the exterior meshes are rebuilt */
     int interior;            /* player is inside the house */
@@ -114,6 +115,10 @@ int mtn_game_interact(mtn_game *g);
 void mtn_game_teleport_trailhead(mtn_game *g);
 float mtn_game_current_fov(const mtn_game *g);
 void mtn_game_refresh_rooms(mtn_game *g, int force);
+/* the built room containing p (interior space), or NULL */
+const mtn_room *mtn_game_room_at(const mtn_game *g, vec3 p);
+/* inside the house: back to the cabin, just inside the front door, facing it */
+int mtn_game_house_entrance(mtn_game *g);
 void mtn_game_play(mtn_game *g, const char *sound, float vol);
 /* plays a sound of something in the world: panned and attenuated from the listener */
 void mtn_game_play_at(mtn_game *g, const char *sound, vec3 pos, float vol);

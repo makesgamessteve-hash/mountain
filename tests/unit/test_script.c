@@ -85,23 +85,47 @@ static void test_species_player_house(void) {
                  "local ok = false; for i = 1, 30 do ok = house.summon(); if ok then break end; player.yaw(i * 0.5, 0) end\n"
                  "assert(ok, 'summoned'); assert(house.exists()); local st, v = house.state(); assert(st == 'appearing')\n"
                  "local d, dd = house.distance(); assert(d and dd); local dx, dy, dz, dyaw = house.door_pos(); assert(dyaw)\n"
-                 "assert(house.room() == -1); assert(house.interact() == false)\n"
+                 "assert(house.room() == nil); assert(house.interact() == false); assert(house.entrance() == false)\n"
                  "local open, angle = house.door(); assert(open == false and angle == 0)\n"
                  "assert(type(house.can_unsummon()) == 'boolean')\n"));
     for (int i = 0; i < 120; i++) mtn_game_update(g, 1.0f / 60.0f);
     /* inside the house: room names */
     g->interior = 1;
     g->player.pos = v3(0, 0, 4);
-    CHECK(run(g, "local i, n = house.room(); assert(i == 0 and n == 'cabin'); local d = house.distance(); assert(d == 0)\n"
-                 "assert(house.unsummon() == false)\n"));
+    mtn_game_refresh_rooms(g, 1);
+    CHECK(run(g, "local n, ci, cj, b = house.room(); assert(n == 'cabin' and ci == 0 and cj == 0 and b == false)\n"
+                 "local d = house.distance(); assert(d == 0); assert(house.unsummon() == false)\n"
+                 "local r = house.room_at(0, 0); assert(r.name == 'cabin' and r.window_side == 'south' and #r.doors == 3)\n"
+                 "assert(math.abs(r.z - r.width / 2) < 1e-4 and r.x == 0 and r.balcony == false and r.height > 2)\n"
+                 "local e = house.room_at(1, 0); assert(e.name ~= 'cabin' and e.length > 0)\n"
+                 "local c = house.room_at(1, 1); player.set_pos(c.x, 0, c.z); local n2, i2, j2 = house.room(); assert(i2 == 1 and j2 == 1 and n2 == c.name)\n"
+                 "assert(house.entrance() == true); local x, y, z = player.pos(); assert(x == 0 and math.abs(z - 1.5) < 1e-6)\n"));
     g->interior = 0;
     CHECK(run(g, "house.clear_rooms(); local t = house.define_room{ name = 'attic', width = 30, height = 1, light = {1, 1, 1},\n"
                  "  wall_color = {0.5, 0.5, 0.5}, floor_color = {200, 180, 160}, cabin = true,\n"
-                 "  items = { {'bed', x = 1, z = 2, rot = 90}, {prefab = 'lamp', x = 0, z = 1, arg = 2, scale = 1.5} } }\n"
-                 "assert(t == 0)\n"));
-    CHECK(g->house.type_count == 1);
-    CHECK_NEAR(g->house.types[0].width, 16.0f, 1e-6);
-    CHECK(g->house.types[0].item_count == 2);
+                 "  items = { {'bed', x = 1, z = 2, rot = 90}, {prefab = 'lamp', x = 0, z = 1, arg = 2, scale = 1.5},\n"
+                 "    {'chest', wall = 'back', along = 0.5, at = 0.2, inset = 0.3, fx = 0.1, fz = 0.2}, {'rug', wall = 'nowhere'} } }\n"
+                 "assert(t == 0)\n"
+                 "assert(house.define_room{ name = 'hall', width = {6, 10}, length = {11}, balcony = true } == 1)\n"
+                 "assert(house.define_room{ name = 'nook', width = 2, length = {3, 50}, balcony = 0.25 } == 2)\n"));
+    CHECK(g->house.type_count == 3);
+    CHECK_NEAR(g->house.types[0].width, MTN_ROOM_MAX_SIZE, 1e-6);
+    CHECK_NEAR(g->house.types[0].height, 2.6f, 1e-6);
+    CHECK(g->house.types[0].item_count == 4);
+    CHECK(g->house.types[0].items[2].wall == MTN_WALL_BACK);
+    CHECK_NEAR(g->house.types[0].items[2].along, 0.5f, 1e-6);
+    CHECK_NEAR(g->house.types[0].items[2].at, 0.2f, 1e-6);
+    CHECK_NEAR(g->house.types[0].items[2].inset, 0.3f, 1e-6);
+    CHECK_NEAR(g->house.types[0].items[2].fz, 0.2f, 1e-6);
+    CHECK(g->house.types[0].items[3].wall == MTN_WALL_NONE);
+    CHECK_NEAR(g->house.types[1].width_min, 6.0f, 1e-6);
+    CHECK_NEAR(g->house.types[1].width_max, 10.0f, 1e-6);
+    CHECK_NEAR(g->house.types[1].length_min, 11.0f, 1e-6);
+    CHECK_NEAR(g->house.types[1].length_max, 11.0f, 1e-6);
+    CHECK_NEAR(g->house.types[1].balcony, 1.0f, 0);
+    CHECK_NEAR(g->house.types[2].width_min, MTN_ROOM_MIN_SIZE, 1e-6);
+    CHECK_NEAR(g->house.types[2].length_max, MTN_ROOM_MAX_SIZE, 1e-6);
+    CHECK_NEAR(g->house.types[2].balcony, 0.25f, 1e-6);
     mtn_test_game_free(g);
 }
 

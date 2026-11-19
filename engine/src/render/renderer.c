@@ -60,8 +60,8 @@ struct mtn_renderer {
     gmesh fauna_solid, fauna_sprites, fx, precip, portal_quad, photo_quad;
     gmesh house_solid, house_sprites, house_glow, door;
     int house_version;
-    gmesh room_solid[3], room_sprites[3], room_glow[3];
-    int rooms_version;
+    gmesh room_solid[MTN_MAX_ROOMS], room_sprites[MTN_MAX_ROOMS], room_glow[MTN_MAX_ROOMS];
+    int rooms_version, room_slot_version[MTN_MAX_ROOMS];
     GLuint ui_vao, ui_vbo;
     int ui_cap;
 
@@ -356,7 +356,7 @@ void mtn_render_destroy(mtn_renderer *r) {
     gmesh_free(&r->house_sprites);
     gmesh_free(&r->house_glow);
     gmesh_free(&r->door);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < MTN_MAX_ROOMS; i++) {
         gmesh_free(&r->room_solid[i]);
         gmesh_free(&r->room_sprites[i]);
         gmesh_free(&r->room_glow[i]);
@@ -629,7 +629,9 @@ static void sync_house(mtn_renderer *r, mtn_game *g) {
     }
     if (r->rooms_version != g->rooms_version) {
         r->rooms_version = g->rooms_version;
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < MTN_MAX_ROOMS; i++) {
+            if (r->room_slot_version[i] == g->room_slot_version[i] && r->room_solid[i].vao) continue;
+            r->room_slot_version[i] = g->room_slot_version[i];
             gmesh_upload(&r->room_solid[i], &g->room_solid[i], 0);
             gmesh_upload(&r->room_sprites[i], &g->room_sprites[i], 0);
             gmesh_upload(&r->room_glow[i], &g->room_glow[i], 0);
@@ -776,31 +778,56 @@ static void world_uniforms(mtn_renderer *r, prog *p, mtn_game *g) {
 static void interior_lights(mtn_renderer *r, prog *p, mtn_game *g) {
     float pos[9 * 4], col[9 * 4];
     int n = 0;
-    /* daylight through the big window of the current room */
-    int cur = mtn_clampi(mtn_house_room_at(r->eye.z) - g->room_base, 0, 2);
-    const mtn_room *cr = &g->rooms[cur];
-    if (cr->length > 0) {
-        vec3 wp = m4_mul_point(cr->window_frame, v3(0, 0, -1.5f));
+    /* daylight through the big window (or the balcony door) of the room we are in */
+    const mtn_room *cr = mtn_game_room_at(g, r->eye);
+    if (cr) {
+        /* inside the window, or out on the balcony where it also lights the house wall */
+        vec3 wp = m4_mul_point(cr->window_frame, v3(0, 0, cr->balcony ? 1.2f : -1.5f));
         vec3 sky = v3_add(v3_scale(g->sky.ambient, 1.6f), v3_scale(g->sky.light_color, 0.35f));
         pos[0] = wp.x; pos[1] = wp.y; pos[2] = wp.z; pos[3] = 9.0f;
         col[0] = sky.x; col[1] = sky.y; col[2] = sky.z; col[3] = 0.0f;
         n = 1;
     }
-    for (int k = 0; k < 3; k++) {
-        int ri = (cur + k) % 3;
-        const mtn_room *rm = &g->rooms[ri];
-        for (int i = 0; i < rm->light_count && n < 9; i++) {
+    /* the nearest lamps, candles and fires */
+    const mtn_light *best[8];
+    float bd[8];
+    int nb = 0;
+    for (int k = 0; k < MTN_MAX_ROOMS; k++) {
+        const mtn_room *rm = &g->rooms[k];
+        if (!rm->built) continue;
+        for (int i = 0; i < rm->light_count; i++) {
             const mtn_light *l = &rm->lights[i];
-            pos[n * 4] = l->pos.x; pos[n * 4 + 1] = l->pos.y; pos[n * 4 + 2] = l->pos.z; pos[n * 4 + 3] = l->radius;
-            col[n * 4] = l->color.x; col[n * 4 + 1] = l->color.y; col[n * 4 + 2] = l->color.z; col[n * 4 + 3] = l->flicker;
-            n++;
+            float d = v3_dist(l->pos, r->eye) - l->radius;
+            int at = nb < 8 ? nb++ : 8;
+            if (at == 8) {
+                if (d >= bd[7]) continue;
+                at = 7;
+            }
+            while (at > 0 && bd[at - 1] > d) {
+                best[at] = best[at - 1];
+                bd[at] = bd[at - 1];
+                at--;
+            }
+            best[at] = l;
+            bd[at] = d;
         }
+    }
+    for (int i = 0; i < nb && n < 9; i++, n++) {
+        const mtn_light *l = best[i];
+        pos[n * 4] = l->pos.x; pos[n * 4 + 1] = l->pos.y; pos[n * 4 + 2] = l->pos.z; pos[n * 4 + 3] = l->radius;
+        col[n * 4] = l->color.x; col[n * 4 + 1] = l->color.y; col[n * 4 + 2] = l->color.z; col[n * 4 + 3] = l->flicker;
     }
     u1i(p, "u_light_count", n);
     if (n) {
         glUniform4fv(uloc(p, "u_lights_pos"), n, pos);
         glUniform4fv(uloc(p, "u_lights_col"), n, col);
     }
+}
+
+static int cabin_built(const mtn_game *g) {
+    for (int i = 0; i < MTN_MAX_ROOMS; i++)
+        if (g->rooms[i].built && g->rooms[i].ci == 0 && g->rooms[i].cj == 0) return 1;
+    return 0;
 }
 
 /* ------------------------------------------------------------------ scene passes */
@@ -1051,8 +1078,9 @@ static void draw_rooms(mtn_renderer *r, mtn_game *g, int blended) {
     interior_lights(r, p, g);
     if (!blended) {
         bind_tex(r->tex_materials);
-        for (int i = 0; i < 3; i++) gmesh_draw(r, &r->room_solid[i]);
-        if (g->room_base == 0) {
+        for (int i = 0; i < MTN_MAX_ROOMS; i++)
+            if (g->rooms[i].built && visible(r, &r->room_solid[i])) gmesh_draw(r, &r->room_solid[i]);
+        if (cabin_built(g)) {
             um4(p, "u_model", mtn_house_door_model(&g->house, 1));
             gmesh_draw(r, &r->door);
             um4(p, "u_model", m4_identity());
@@ -1060,7 +1088,8 @@ static void draw_rooms(mtn_renderer *r, mtn_game *g, int blended) {
         draw_photo_slots(r, g, p);
         bind_tex(r->tex_foliage);
         glDisable(GL_CULL_FACE);
-        for (int i = 0; i < 3; i++) gmesh_draw(r, &r->room_sprites[i]);
+        for (int i = 0; i < MTN_MAX_ROOMS; i++)
+            if (g->rooms[i].built && visible(r, &r->room_sprites[i])) gmesh_draw(r, &r->room_sprites[i]);
         glEnable(GL_CULL_FACE);
     } else {
         glEnable(GL_BLEND);
@@ -1069,7 +1098,8 @@ static void draw_rooms(mtn_renderer *r, mtn_game *g, int blended) {
         u1f(p, "u_alpha_test", 0.02f);
         u1f(p, "u_emissive", 1.4f);
         bind_tex(r->tex_materials);
-        for (int i = 0; i < 3; i++) gmesh_draw(r, &r->room_glow[i]);
+        for (int i = 0; i < MTN_MAX_ROOMS; i++)
+            if (g->rooms[i].built && visible(r, &r->room_glow[i])) gmesh_draw(r, &r->room_glow[i]);
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
     }
@@ -1116,8 +1146,9 @@ void mtn_render_forget_photo(mtn_renderer *r, const char *name) {
 }
 
 static void draw_photo_slots(mtn_renderer *r, mtn_game *g, prog *p) {
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k < MTN_MAX_ROOMS; k++) {
         const mtn_room *rm = &g->rooms[k];
+        if (!rm->built || v3_dist(rm->center, r->eye) > 30.0f) continue;
         for (int i = 0; i < rm->photo_count; i++) {
             const mtn_photo_slot *s = &rm->photos[i];
             GLuint t = photo_texture(r, g, s->photo);
@@ -1150,21 +1181,30 @@ static vec4 plane_to_view(mat4 view, vec3 n, vec3 o) {
 
 static void render_space(mtn_renderer *r, mtn_game *g, int space, int depth);
 
-/* quad: 4 corners in the current space; M maps current space -> target space; target_frame is
- * the portal frame in target space (for the near clip plane) */
-static void draw_portal(mtn_renderer *r, mtn_game *g, const vec3 q[4], mat4 m, mat4 target_frame, int target) {
-    vec3 c = v3_scale(v3_add(v3_add(q[0], q[1]), v3_add(q[2], q[3])), 0.25f);
-    float rad = v3_dist(c, q[0]);
-    if (!mtn_frustum_sphere(&r->frustum, c, rad)) return;
-    vec3 n = v3_norm(v3_cross(v3_sub(q[1], q[0]), v3_sub(q[2], q[0])));
-    if (v3_dot(n, v3_sub(r->eye, c)) <= 0.0f) return; /* seen from behind */
-    r->stats.portals++;
+/* Openings into another space: n quads (4 corners each, facing the viewer) in the current
+ * space, all leading through M (current space -> target space). With clip, the target is
+ * clipped at target_frame's plane (an oblique near plane), so nothing behind the opening
+ * shows. Returns 1 when any of the openings was in view. */
+static int draw_portal_set(mtn_renderer *r, mtn_game *g, const vec3 (*qs)[4], int nq, mat4 m, mat4 target_frame, int clip,
+                           int target) {
     mtn_mesh_clear(&r->scratch_a);
     mtn_material mat = mtn_mat(0xFFFFFFFFu, 255, 0, 1.0f);
-    mtn_mesh_quad(&r->scratch_a, m4_identity(), q[0], q[1], q[2], q[3], &mat, v2(0, 0), v2(1, 1));
+    int shown = 0;
+    for (int k = 0; k < nq; k++) {
+        const vec3 *q = qs[k];
+        vec3 c = v3_scale(v3_add(v3_add(q[0], q[1]), v3_add(q[2], q[3])), 0.25f);
+        float rad = mtn_maxf(v3_dist(c, q[0]), v3_dist(c, q[1]));
+        if (!mtn_frustum_sphere(&r->frustum, c, rad)) continue;
+        vec3 n = v3_norm(v3_cross(v3_sub(q[1], q[0]), v3_sub(q[2], q[0])));
+        if (v3_dot(n, v3_sub(r->eye, c)) <= 0.0f) continue; /* seen from behind */
+        mtn_mesh_quad(&r->scratch_a, m4_identity(), q[0], q[1], q[2], q[3], &mat, v2(0, 0), v2(1, 1));
+        shown++;
+    }
+    if (!shown) return 0;
+    r->stats.portals++;
     gmesh_upload(&r->portal_quad, &r->scratch_a, 1);
     prog *p = &r->sh_portal;
-    /* 1. mark the visible part of the opening in the stencil buffer */
+    /* 1. mark the visible part of the openings in the stencil buffer */
     glUseProgram(p->id);
     um4(p, "u_viewproj", r->viewproj);
     u1i(p, "u_far", 0);
@@ -1176,7 +1216,7 @@ static void draw_portal(mtn_renderer *r, mtn_game *g, const vec3 q[4], mat4 m, m
     glDepthMask(GL_FALSE);
     glDisable(GL_CULL_FACE);
     gmesh_draw(r, &r->portal_quad);
-    /* 2. push depth to the far plane inside the opening */
+    /* 2. push depth to the far plane inside the openings */
     glStencilFunc(GL_EQUAL, 1, 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
     glDepthMask(GL_TRUE);
@@ -1186,22 +1226,25 @@ static void draw_portal(mtn_renderer *r, mtn_game *g, const vec3 q[4], mat4 m, m
     glDepthFunc(GL_LESS);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glEnable(GL_CULL_FACE);
-    /* 3. render the other space through the opening, clipped at the portal plane */
+    /* 3. render the other space through the openings */
     mat4 sv = r->view, sp = r->proj;
     vec3 se = r->eye;
     int sspace = r->space;
     mat4 nv = m4_mul(r->view, m4_inverse(m));
     vec3 neye = m4_mul_point(m, r->eye);
-    vec3 fo = v3(target_frame.m[12], target_frame.m[13], target_frame.m[14]);
-    vec3 ff = v3(target_frame.m[8], target_frame.m[9], target_frame.m[10]);
-    vec3 pn = v3_scale(ff, -1.0f);
-    vec4 cp = plane_to_view(nv, pn, v3_add(fo, v3_scale(pn, -0.02f)));
-    mat4 np = m4_oblique_near(r->proj, cp);
+    mat4 np = r->proj;
+    if (clip) {
+        vec3 fo = v3(target_frame.m[12], target_frame.m[13], target_frame.m[14]);
+        vec3 ff = v3(target_frame.m[8], target_frame.m[9], target_frame.m[10]);
+        vec3 pn = v3_scale(ff, -1.0f);
+        vec4 cp = plane_to_view(nv, pn, v3_add(fo, v3_scale(pn, -0.02f)));
+        np = m4_oblique_near(r->proj, cp);
+    }
     set_camera(r, nv, np, neye);
     render_space(r, g, target, r->depth + 1);
     set_camera(r, sv, sp, se);
     r->space = sspace;
-    /* 4. restore the opening's depth and clear the stencil */
+    /* 4. restore the openings' depth and clear the stencil (the nested pass draws no portals) */
     glUseProgram(p->id);
     um4(p, "u_viewproj", r->viewproj);
     u1i(p, "u_far", 0);
@@ -1215,6 +1258,53 @@ static void draw_portal(mtn_renderer *r, mtn_game *g, const vec3 q[4], mat4 m, m
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glEnable(GL_CULL_FACE);
     glDisable(GL_STENCIL_TEST);
+    return 1;
+}
+
+static int draw_portal(mtn_renderer *r, mtn_game *g, const vec3 q[4], mat4 m, mat4 target_frame, int target) {
+    const vec3(*qs)[4] = (const vec3(*)[4])q;
+    return draw_portal_set(r, g, qs, 1, m, target_frame, 1, target);
+}
+
+/* the windows and balconies of the rooms around, nearest first, a few per frame */
+static void draw_room_views(mtn_renderer *r, mtn_game *g) {
+    mtn_house *h = &g->house;
+    int order[MTN_MAX_ROOMS], n = 0;
+    float dist[MTN_MAX_ROOMS];
+    for (int i = 0; i < MTN_MAX_ROOMS; i++) {
+        const mtn_room *rm = &g->rooms[i];
+        if (!rm->built) continue;
+        vec3 wc = v3(rm->window_frame.m[12], rm->window_frame.m[13], rm->window_frame.m[14]);
+        float d = v3_dist(wc, r->eye);
+        if (d > 24.0f) continue;
+        int at = n++;
+        while (at > 0 && dist[at - 1] > d) {
+            order[at] = order[at - 1];
+            dist[at] = dist[at - 1];
+            at--;
+        }
+        order[at] = i;
+        dist[at] = d;
+    }
+    int budget = 3;
+    for (int k = 0; k < n && budget > 0; k++) {
+        const mtn_room *rm = &g->rooms[order[k]];
+        mat4 m = mtn_house_window_to_world(h, &g->terrain, rm);
+        mat4 f = rm->window_frame;
+        /* the target frame is where the window lands in the world */
+        mat4 tf = m4_mul(m4_mul(m, f), m4_rotate_y(MTN_PI));
+        if (rm->balcony) {
+            /* behind the wall the view is clipped at it; out on the balcony nothing is */
+            vec3 le = m4_mul_point(m4_inverse(rm->xf), r->eye);
+            int clip = le.x < rm->width * 0.5f - 0.02f;
+            budget -= draw_portal_set(r, g, (const vec3(*)[4])rm->balcony_quads, 5, m, tf, clip, 0);
+        } else {
+            vec3 hs = rm->window_size;
+            vec3 q[4] = {m4_mul_point(f, v3(hs.x, -hs.y, 0)), m4_mul_point(f, v3(-hs.x, -hs.y, 0)),
+                         m4_mul_point(f, v3(-hs.x, hs.y, 0)), m4_mul_point(f, v3(hs.x, hs.y, 0))};
+            budget -= draw_portal(r, g, q, m, tf, 0);
+        }
+    }
 }
 
 static void door_quad_ext(const mtn_house *h, vec3 q[4]) {
@@ -1245,20 +1335,8 @@ static void render_space(mtn_renderer *r, mtn_game *g, int space, int depth) {
         draw_sky(r, g, 1);
         draw_rooms(r, g, 0);
         if (depth == 0) {
-            for (int i = 0; i < 3; i++) {
-                const mtn_room *rm = &g->rooms[i];
-                if (rm->length <= 0) continue;
-                vec3 hs = rm->window_size;
-                mat4 f = rm->window_frame;
-                vec3 q[4] = {m4_mul_point(f, v3(hs.x, -hs.y, 0)), m4_mul_point(f, v3(-hs.x, -hs.y, 0)),
-                             m4_mul_point(f, v3(-hs.x, hs.y, 0)), m4_mul_point(f, v3(hs.x, hs.y, 0))};
-                mat4 m = mtn_house_window_to_world(h, &g->terrain, rm);
-                /* the target frame is where the window lands in the world */
-                mat4 tf = m4_mul(m, f);
-                tf = m4_mul(tf, m4_rotate_y(MTN_PI));
-                draw_portal(r, g, q, m, tf, 0);
-            }
-            if (g->room_base == 0 && h->door_angle > 0.02f) {
+            draw_room_views(r, g);
+            if (cabin_built(g) && h->door_angle > 0.02f) {
                 float dw = MTN_DOOR_WIDTH * 0.5f;
                 vec3 q[4] = {v3(-dw, 0, 0), v3(dw, 0, 0), v3(dw, MTN_DOOR_HEIGHT, 0), v3(-dw, MTN_DOOR_HEIGHT, 0)};
                 mat4 m = m4_inverse(mtn_house_ext_to_int(h));

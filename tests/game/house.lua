@@ -96,42 +96,145 @@ test.check(open, "door opened with E")
 stand_before_door(5)
 test.frames(3)
 test.screenshot("house_door_open")
-stand_before_door(1.5)
+stand_before_door(1.0)
 -- walk in with W
 test.key("w", true)
 test.wait(2.5)
 test.key("w", false)
 test.frames(5)
 test.check(player.inside(), "walked through the open door into the house")
-local idx, name = house.room()
-test.check(idx == 0 and name == "cabin", "first room is the cabin, got " .. tostring(name))
+local name, ci, cj = house.room()
+test.check(name == "cabin" and ci == 0 and cj == 0, "first room is the cabin, got " .. tostring(name))
 test.screenshot("house_cabin")
--- look at the big window (+x wall)
-player.yaw(math.pi / 2, 0.05)
+-- the window beside the front door shows the real view
+player.set_pos(2.0, 0, 4.0)
+player.yaw(0.35, 0.02)
 test.frames(5)
 test.screenshot("house_cabin_window")
 player.yaw(-math.pi / 2, -0.1)
 test.frames(5)
 test.screenshot("house_cabin_left")
--- walk to the back door and into the next rooms
-for room = 1, 3 do
-  player.set_pos(0, 0, (room - 1) * 9 + 7.5)
-  player.yaw(math.pi, 0)
+
+-- the cabin has doorways on three sides: walk through each into a different room
+local dirs = {east = {1, 0}, west = {-1, 0}, north = {0, 1}, south = {0, -1}}
+local function yaw_of(d) return math.atan(d[1], -d[2]) end
+local function walk_to(ci, cj, side)
+  local r = house.room_at(ci, cj)
+  local d = dirs[side]
+  player.set_pos(r.x, 0, r.z)
+  player.yaw(yaw_of(d), 0)
+  test.frames(2)
+  test.key("left shift", true)
   test.key("w", true)
-  test.wait(1.4)
+  local reached = false
+  for _ = 1, 60 do
+    test.wait(0.1)
+    local _, i, j = house.room()
+    if i == ci + d[1] and j == cj + d[2] then
+      local n = house.room_at(i, j)
+      local px, _, pz = player.pos()
+      if math.abs(px - n.x) + math.abs(pz - n.z) < 4 then reached = true; break end
+    end
+  end
   test.key("w", false)
+  test.key("left shift", false)
   test.frames(3)
-  local i2, n2 = house.room()
-  test.check(i2 == room, "walked into room " .. room .. " (got " .. tostring(i2) .. ")")
-  player.yaw(math.pi / 2 + 0.3, 0.05)
-  test.frames(4)
-  test.screenshot("house_room_" .. room .. "_" .. tostring(n2):gsub(" ", "_"))
+  return reached
 end
--- far room index jump (endless)
-player.set_pos(0, 0, 9 * 40 + 4)
-test.frames(4)
-test.check(house.room() == 40, "room 40 exists")
--- back to the cabin and out of the front door
+local cabin = house.room_at(0, 0)
+test.check(#cabin.doors == 3 and cabin.window_side == "south", "cabin: doors on three sides, the front door south")
+local names = {}
+for _, side in ipairs(cabin.doors) do
+  local ok = walk_to(0, 0, side)
+  local n2, i2, j2, balcony = house.room()
+  test.check(ok, "walked " .. side .. " from the cabin into room " .. tostring(i2) .. "," .. tostring(j2))
+  names[n2] = true
+  player.yaw(yaw_of(dirs[house.room_at(i2, j2).window_side]) + 0.3, 0.05)
+  test.frames(4)
+  test.screenshot("house_room_" .. side .. "_" .. tostring(n2):gsub(" ", "_"))
+end
+local kinds = 0
+for _ in pairs(names) do kinds = kinds + 1 end
+test.check(kinds == 3, "three different rooms around the cabin")
+
+-- a balcony somewhere near: step out onto it
+local bal
+for r = 1, 4 do
+  for i = -r, r do
+    for j = -r, r do
+      if not bal and math.abs(i) + math.abs(j) == r and house.room_at(i, j).balcony then bal = {i, j} end
+    end
+  end
+end
+test.check(bal ~= nil, "a room with a balcony nearby")
+if bal then
+  local r = house.room_at(bal[1], bal[2])
+  local d = dirs[r.window_side]
+  -- just inside the balcony door (nothing stands in front of a doorway)
+  player.set_pos(r.x + d[1] * (r.width / 2 - 1.0), 0, r.z + d[2] * (r.width / 2 - 1.0))
+  player.yaw(yaw_of(d), 0)
+  test.frames(3)
+  test.screenshot("house_balcony_door")
+  test.key("w", true)
+  test.wait(1.6)
+  test.key("w", false)
+  test.wait(1.0)
+  local px, _, pz = player.pos()
+  local out = (px - r.x) * d[1] + (pz - r.z) * d[2]
+  test.check(out > r.width / 2 + 0.3, "out on the balcony (" .. out .. ")")
+  test.check(out < r.width / 2 + 2.0, "the railing keeps the player on the balcony (" .. out .. ")")
+  test.screenshot("house_balcony")
+  player.yaw(yaw_of(d) + 1.2, -0.45)
+  test.frames(4)
+  test.screenshot("house_balcony_down")
+end
+
+-- forty rooms to the east, stepping around closed walls: always a way onward
+local i, j = 0, 0
+local visited, sizes, kinds40 = 0, {}, {}
+while i < 40 do
+  local r = house.room_at(i, j)
+  local has = {}
+  for _, s in ipairs(r.doors) do has[s] = true end
+  test.check(#r.doors >= 3, "room " .. i .. "," .. j .. " has doors on three sides")
+  if has.east then i = i + 1 elseif has.north then j = j + 1 else j = j - 1 end
+  local n = house.room_at(i, j)
+  player.set_pos(n.x, 0, n.z)
+  test.frames(1)
+  local nm, ri, rj = house.room()
+  if ri ~= i or rj ~= j then test.check(false, "arrived in room " .. i .. "," .. j) end
+  visited = visited + 1
+  sizes[math.floor(n.width * n.length / 15)] = true
+  kinds40[nm] = true
+end
+local nsizes, nkinds = 0, 0
+for _ in pairs(sizes) do nsizes = nsizes + 1 end
+for _ in pairs(kinds40) do nkinds = nkinds + 1 end
+test.check(visited >= 40, "walked through " .. visited .. " rooms")
+test.check(nsizes >= 3 and nkinds >= 5, "rooms differ: " .. nsizes .. " sizes, " .. nkinds .. " kinds")
+local st = test.stats()
+engine.log("far away", i, j, house.room(), st and st.draw_calls)
+test.screenshot("house_far_room")
+
+-- one press of the house key: back at the front door
+tap("h")
+test.frames(3)
+local bn, bi, bj = house.room()
+local px, _, pz = player.pos()
+test.check(bn == "cabin" and bi == 0 and bj == 0 and math.abs(pz - 1.5) < 0.3, "back to the door with H")
+test.screenshot("house_back_at_door")
+-- and with the touch button
+player.set_pos(house.room_at(1, 0).x, 0, house.room_at(1, 0).z)
+test.frames(2)
+test.touch("down", 9, 0.5, 0.5); test.frames(2); test.touch("up", 9, 0.5, 0.5); test.frames(2)
+local hx, hy = test.touch_button("house")
+test.check(hx ~= nil, "touch button for the house")
+if hx then
+  test.touch("down", 3, hx, hy); test.frames(2); test.touch("up", 3, hx, hy); test.frames(3)
+  local tn, ti, tj = house.room()
+  test.check(tn == "cabin" and ti == 0 and tj == 0, "back to the door with the touch button")
+end
+-- out of the front door
 player.set_pos(0, 0, 2.0)
 player.yaw(0, 0)
 test.frames(3)
