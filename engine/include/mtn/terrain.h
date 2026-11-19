@@ -54,7 +54,7 @@ typedef struct {
     float *moist;   /* 0..1 */
     uint8_t *biome; /* mtn_biome per grid point */
     float *trail_dist; /* distance to trail in metres (capped) */
-    int *trail_near;   /* nearest trail sample per grid point or -1 */
+    int *trail_cell_start, *trail_cell_items; /* trail segments near each grid cell */
     float min_h, max_h;
     vec3 center;
     vec3 summit;

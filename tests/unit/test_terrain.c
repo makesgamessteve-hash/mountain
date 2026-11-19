@@ -164,6 +164,28 @@ static void test_trail_shape(void) {
     mtn_terrain_free(&t);
 }
 
+/* Every point of the path, on any world, stands on the path surface. */
+static void test_trail_surface_everywhere(void) {
+    for (uint32_t seed = 1; seed <= 4; seed++) {
+        mtn_terrain t;
+        mtn_terrain_params p;
+        mtn_terrain_default_params(&p);
+        p.seed = seed * 1013u;
+        p.size = 257;
+        p.cell = 12.0f;
+        p.erosion_drops = 8000;
+        mtn_terrain_generate(&t, &p);
+        int missed = 0;
+        for (int i = 0; i + 1 < t.trail_len; i++) {
+            vec3 m = v3_lerp(t.trail[i], t.trail[i + 1], 0.5f);
+            float y = -1e9f;
+            if (!mtn_terrain_trail_surface(&t, m.x, m.z, &y) || fabsf(y - m.y) > 0.3f) missed++;
+        }
+        CHECK(missed == 0);
+        mtn_terrain_free(&t);
+    }
+}
+
 static void test_lakes(void) {
     /* A bowl must become a lake; with a sea level everything low is water. */
     mtn_terrain t;
@@ -220,6 +242,7 @@ MTN_SUITE(terrain) {
     TEST_RUN(test_queries);
     TEST_RUN(test_trail_and_viewpoints);
     TEST_RUN(test_trail_shape);
+    TEST_RUN(test_trail_surface_everywhere);
     TEST_RUN(test_lakes);
     TEST_RUN(test_erosion);
 }

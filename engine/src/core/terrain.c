@@ -480,10 +480,7 @@ static const int NB16Z[16] = {0, 0, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 2, 2, -2,
 static void stamp_trail_distance(mtn_terrain *t) {
     int n = t->n;
     const float cap = 40.0f;
-    for (int i = 0; i < n * n; i++) {
-        t->trail_dist[i] = cap;
-        t->trail_near[i] = -1;
-    }
+    for (int i = 0; i < n * n; i++) t->trail_dist[i] = cap;
     int rad = (int)ceilf(cap / t->cell);
     for (int k = 0; k < t->trail_len; k++) {
         vec3 p = t->trail[k];
@@ -492,41 +489,69 @@ static void stamp_trail_distance(mtn_terrain *t) {
             for (int x = cx - rad; x <= cx + rad; x++) {
                 if (x < 0 || z < 0 || x >= n || z >= n) continue;
                 float d = v3_dist_xz(p, v3((float)x * t->cell, 0, (float)z * t->cell));
-                if (d < t->trail_dist[z * n + x]) {
-                    t->trail_dist[z * n + x] = d;
-                    t->trail_near[z * n + x] = k;
-                }
+                if (d < t->trail_dist[z * n + x]) t->trail_dist[z * n + x] = d;
             }
     }
 }
 
+/* Spatial index of the trail: every grid cell lists the segments that pass within
+ * TRAIL_REACH of it (compressed rows: start[cell] .. start[cell + 1]). */
+#define TRAIL_REACH (MTN_TRAIL_WIDTH * 0.5f + 1.5f)
+
+static int trail_cells(const mtn_terrain *t, int k, int *x0, int *z0, int *x1, int *z1) {
+    vec3 a = t->trail[k], b = t->trail[k + 1];
+    *x0 = mtn_clampi((int)floorf((fminf(a.x, b.x) - TRAIL_REACH) / t->cell), 0, t->n - 1);
+    *x1 = mtn_clampi((int)floorf((fmaxf(a.x, b.x) + TRAIL_REACH) / t->cell), 0, t->n - 1);
+    *z0 = mtn_clampi((int)floorf((fminf(a.z, b.z) - TRAIL_REACH) / t->cell), 0, t->n - 1);
+    *z1 = mtn_clampi((int)floorf((fmaxf(a.z, b.z) + TRAIL_REACH) / t->cell), 0, t->n - 1);
+    return (*x1 - *x0 + 1) * (*z1 - *z0 + 1);
+}
+
+static void index_trail(mtn_terrain *t) {
+    int n = t->n;
+    size_t nc = (size_t)n * (size_t)n;
+    free(t->trail_cell_start);
+    free(t->trail_cell_items);
+    t->trail_cell_start = calloc(nc + 1, sizeof(int));
+    int x0, z0, x1, z1;
+    for (int k = 0; k + 1 < t->trail_len; k++) {
+        trail_cells(t, k, &x0, &z0, &x1, &z1);
+        for (int z = z0; z <= z1; z++)
+            for (int x = x0; x <= x1; x++) t->trail_cell_start[z * n + x + 1]++;
+    }
+    for (size_t c = 0; c < nc; c++) t->trail_cell_start[c + 1] += t->trail_cell_start[c];
+    int *fill = malloc(sizeof(int) * nc);
+    memcpy(fill, t->trail_cell_start, sizeof(int) * nc);
+    t->trail_cell_items = malloc(sizeof(int) * (size_t)(t->trail_cell_start[nc] + 1));
+    for (int k = 0; k + 1 < t->trail_len; k++) {
+        trail_cells(t, k, &x0, &z0, &x1, &z1);
+        for (int z = z0; z <= z1; z++)
+            for (int x = x0; x <= x1; x++) t->trail_cell_items[fill[z * n + x]++] = k;
+    }
+    free(fill);
+}
+
 int mtn_terrain_trail_nearest(const mtn_terrain *t, float x, float z, vec3 *closest) {
-    if (!t->trail_near || t->trail_len < 2) return 0;
-    int gx = (int)floorf(x / t->cell), gz = (int)floorf(z / t->cell);
+    if (!t->trail_cell_start || t->trail_len < 2) return 0;
+    int cx = (int)floorf(x / t->cell), cz = (int)floorf(z / t->cell);
+    if (cx < 0 || cz < 0 || cx >= t->n || cz >= t->n) return 0;
+    int c = cz * t->n + cx;
     float best = 1e30f;
     vec3 q = v3(x, 0, z);
-    int found = 0;
-    for (int c = 0; c < 4; c++) {
-        int cx = gx + (c & 1), cz = gz + (c >> 1);
-        if (cx < 0 || cz < 0 || cx >= t->n || cz >= t->n) continue;
-        int k0 = t->trail_near[cz * t->n + cx];
-        if (k0 < 0) continue;
-        for (int k = k0 - 6; k <= k0 + 6; k++) {
-            if (k < 0 || k + 1 >= t->trail_len) continue;
-            vec3 a = t->trail[k], b = t->trail[k + 1];
-            vec3 ab = v3(b.x - a.x, 0, b.z - a.z);
-            float l2 = ab.x * ab.x + ab.z * ab.z;
-            float f = l2 > 1e-8f ? mtn_clampf(((x - a.x) * ab.x + (z - a.z) * ab.z) / l2, 0.0f, 1.0f) : 0.0f;
-            vec3 p = v3_lerp(a, b, f);
-            float d = v3_dist_xz(p, q);
-            if (d < best) {
-                best = d;
-                *closest = p;
-                found = 1;
-            }
+    for (int i = t->trail_cell_start[c]; i < t->trail_cell_start[c + 1]; i++) {
+        int k = t->trail_cell_items[i];
+        vec3 a = t->trail[k], b = t->trail[k + 1];
+        vec3 ab = v3(b.x - a.x, 0, b.z - a.z);
+        float l2 = ab.x * ab.x + ab.z * ab.z;
+        float f = l2 > 1e-8f ? mtn_clampf(((x - a.x) * ab.x + (z - a.z) * ab.z) / l2, 0.0f, 1.0f) : 0.0f;
+        vec3 p = v3_lerp(a, b, f);
+        float d = v3_dist_xz(p, q);
+        if (d < best) {
+            best = d;
+            *closest = p;
         }
     }
-    return found;
+    return best < 1e29f;
 }
 
 int mtn_terrain_trail_surface(const mtn_terrain *t, float x, float z, float *y) {
@@ -905,6 +930,7 @@ int mtn_terrain_find_trail(mtn_terrain *t) {
     t->trailhead.y = mtn_terrain_height(t, t->trailhead.x, t->trailhead.z);
     place_markers(t);
     stamp_trail_distance(t);
+    index_trail(t);
     return ok;
 }
 
@@ -1027,7 +1053,6 @@ int mtn_terrain_generate(mtn_terrain *t, const mtn_terrain_params *p) {
     t->water = malloc(sizeof(float) * nn);
     t->moist = malloc(sizeof(float) * nn);
     t->trail_dist = malloc(sizeof(float) * nn);
-    t->trail_near = malloc(sizeof(int) * nn);
     t->biome = malloc(nn);
     generate_shape(t);
     mtn_terrain_erode(t->h, t->n, t->cell, p->erosion_drops, p->seed);
@@ -1071,7 +1096,8 @@ void mtn_terrain_free(mtn_terrain *t) {
     free(t->water);
     free(t->moist);
     free(t->trail_dist);
-    free(t->trail_near);
+    free(t->trail_cell_start);
+    free(t->trail_cell_items);
     free(t->biome);
     free(t->trail);
     free(t->cairns);
