@@ -14,4 +14,4 @@ mkdir -p "$BUILD/report"
 gcovr --root "$ROOT" --object-directory "$BUILD" --filter "$ROOT/engine/" \
       --exclude-unreachable-branches --print-summary \
       --html-details "$BUILD/report/index.html" --txt "$BUILD/report/coverage.txt" \
-      --fail-under-line "$MIN"
+      --fail-under-line "$MIN" "$BUILD"

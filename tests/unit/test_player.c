@@ -420,10 +420,54 @@ static void test_obstacles(void) {
     CHECK(!p.blocked);
 }
 
+/* a steep wall rising towards +x (about 72 degrees) with a gentle step in z */
+static float slide_ground(void *ctx, float x, float z, vec3 *n, int *surf) {
+    (void)ctx;
+    *surf = 1;
+    float k = *(float *)ctx;
+    if (x <= 5.0f) {
+        *n = v3(0, 1, 0);
+        return z > 20.0f ? k : 0.0f; /* beyond z = 20 an obstacle step of height k */
+    }
+    *n = v3_norm(v3(-3.0f, 1.0f, 0.0f));
+    return (x - 5.0f) * 3.0f;
+}
+
+static void test_slide_along_slope(void) {
+    float step = 0.0f;
+    mtn_collider c = {&step, slide_ground, NULL, NULL};
+    mtn_player p;
+    /* walking diagonally into the steep slope slides along it (+z) instead of stopping */
+    mtn_player_init(&p, v3(4.9f, 0, 0), 0.0f);
+    p.yaw = MTN_PI * 0.25f; /* forward = (+x, -z) */
+    mtn_move_input in = {0};
+    in.move_y = 1.0f;
+    for (int i = 0; i < 60; i++) mtn_player_update(&p, &in, &c, 1.0f / 60.0f);
+    CHECK(p.blocked);
+    CHECK(p.pos.x < 5.3f);       /* did not climb the wall */
+    CHECK(p.pos.z < -1.0f);      /* but moved along it */
+    CHECK(p.vel.x < 0.5f);
+    /* straight into the wall: no sideways component, so it stops */
+    mtn_player_init(&p, v3(4.9f, 0, 0), MTN_PI * 0.5f);
+    for (int i = 0; i < 30; i++) mtn_player_update(&p, &in, &c, 1.0f / 60.0f);
+    CHECK_NEAR(p.pos.z, 0.0f, 1e-3);
+    CHECK(p.pos.x < 5.3f);
+    /* sliding into something too high on the side as well: stays put */
+    step = 10.0f;
+    mtn_player_init(&p, v3(4.95f, 0, 19.99f), 0.0f);
+    p.yaw = MTN_PI * 0.75f; /* forward = (+x, +z) */
+    vec3 start = p.pos;
+    mtn_player_update(&p, &in, &c, 1.0f / 60.0f);
+    mtn_player_update(&p, &in, &c, 1.0f / 60.0f);
+    CHECK(p.blocked);
+    CHECK(v3_dist_xz(p.pos, start) < 0.2f);
+}
+
 MTN_SUITE(player) {
     TEST_RUN(test_init_and_view);
     TEST_RUN(test_walking);
     TEST_RUN(test_slopes);
     TEST_RUN(test_jump_and_fall);
     TEST_RUN(test_obstacles);
+    TEST_RUN(test_slide_along_slope);
 }
