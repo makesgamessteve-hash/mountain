@@ -106,10 +106,32 @@ function earth.fauna()
     color = {0.55, 0.45, 0.35}, color2 = {0.85, 0.80, 0.72}, horns = 3, tail = 0.05, walk_speed = 1.5, run_speed = 6,
     comfort = 15, alt_min = 0.0, alt_max = 0.7, biomes = {"meadow", "alpine", "forest"}, from = 5, to = 22,
     group_min = 1, group_max = 2, max_groups = 2, chance = 0.4 }
+  fauna.species{ name = "chamois", kind = "quadruped", size = 1.1, leg = 0.62, neck = 0.38, head = 0.2,
+    color = {0.36, 0.27, 0.18}, color2 = {0.86, 0.80, 0.70}, horns = 2, tail = 0.06, walk_speed = 1.1, run_speed = 6,
+    comfort = 24, alt_min = 0.5, alt_max = 0.98, biomes = {"alpine", "rock", "scree", "snow"}, from = 5, to = 20,
+    group_min = 2, group_max = 6, max_groups = 2, chance = 0.45 }
+  fauna.species{ name = "wild boar", kind = "quadruped", size = 1.3, leg = 0.42, neck = 0.16, head = 0.32,
+    color = {0.27, 0.23, 0.19}, color2 = {0.40, 0.34, 0.28}, horns = 0, tail = 0.14, walk_speed = 0.9, run_speed = 5,
+    comfort = 20, alt_min = 0.0, alt_max = 0.45, biomes = {"forest"}, from = 18, to = 8,
+    group_min = 1, group_max = 5, max_groups = 1, chance = 0.35 }
+  fauna.species{ name = "red squirrel", kind = "quadruped", size = 0.32, leg = 0.08, neck = 0.07, head = 0.08,
+    color = {0.68, 0.30, 0.12}, color2 = {0.92, 0.88, 0.80}, horns = 3, tail = 0.34, walk_speed = 1.4, run_speed = 5,
+    comfort = 9, alt_min = 0.0, alt_max = 0.5, biomes = {"forest"}, from = 7, to = 19,
+    group_min = 1, group_max = 2, max_groups = 2, chance = 0.55 }
+  fauna.species{ name = "badger", kind = "quadruped", size = 0.8, leg = 0.14, neck = 0.08, head = 0.16,
+    color = {0.42, 0.42, 0.44}, color2 = {0.92, 0.92, 0.92}, horns = 0, tail = 0.1, walk_speed = 0.7, run_speed = 3,
+    comfort = 12, alt_min = 0.0, alt_max = 0.5, biomes = {"forest", "meadow"}, from = 19, to = 6,
+    seasons = {"spring", "summer", "autumn"}, group_min = 1, group_max = 1, max_groups = 1, chance = 0.3 }
+  fauna.species{ name = "mountain hare", kind = "quadruped", size = 0.48, leg = 0.2, neck = 0.12, head = 0.11,
+    color = {0.94, 0.94, 0.96}, color2 = {0.98, 0.98, 1.0}, horns = 3, tail = 0.05, walk_speed = 1.5, run_speed = 6,
+    comfort = 15, alt_min = 0.35, alt_max = 0.95, biomes = {"alpine", "scree", "snow", "meadow"}, from = 6, to = 20,
+    seasons = {"winter"}, group_min = 1, group_max = 2, max_groups = 2, chance = 0.5 }
   fauna.species{ name = "songbirds", kind = "bird", size = 0.35, color = {0.25, 0.22, 0.20}, from = 5, to = 20,
     seasons = {"spring", "summer", "autumn"}, alt_min = 0.0, alt_max = 0.7, group_min = 4, group_max = 9, max_groups = 2, chance = 0.6 }
   fauna.species{ name = "golden eagle", kind = "soaring", size = 2.1, color = {0.30, 0.22, 0.14}, from = 8, to = 18,
     alt_min = 0.3, alt_max = 1.0, group_min = 1, group_max = 1, max_groups = 1, chance = 0.3 }
+  fauna.species{ name = "ravens", kind = "soaring", size = 1.1, color = {0.07, 0.07, 0.09}, from = 7, to = 19,
+    alt_min = 0.45, alt_max = 1.0, group_min = 2, group_max = 3, max_groups = 1, chance = 0.4, sound = "raven" }
   fauna.species{ name = "peacock butterfly", kind = "butterfly", size = 0.35, tile = 32, from = 9, to = 18,
     seasons = {"spring", "summer"}, alt_min = 0.0, alt_max = 0.7, biomes = {"meadow", "alpine"},
     group_min = 2, group_max = 5, max_groups = 2, chance = 0.6 }

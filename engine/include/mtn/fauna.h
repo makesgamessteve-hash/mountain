@@ -8,7 +8,7 @@
 #include "mtn/terrain.h"
 
 #define MTN_MAX_ANIMAL_SPECIES 24
-#define MTN_MAX_ANIMALS 96
+#define MTN_MAX_ANIMALS 128
 
 typedef enum {
     MTN_ANIMAL_QUADRUPED = 0, /* deer, ibex, fox, rabbit, marmot */

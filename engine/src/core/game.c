@@ -85,7 +85,7 @@ int mtn_game_load_sounds(mtn_game *g) {
     static const char *names[] = {"wind_loop", "rain_loop", "birds_loop", "crickets_loop", "stream_loop", "fire_loop",
                                   "step_grass_1", "step_grass_2", "step_rock_1", "step_rock_2", "step_snow_1",
                                   "step_snow_2", "step_wood_1", "step_wood_2", "door_open", "door_close", "shutter",
-                                  "summon", "unsummon", "thunder", "owl", "marmot", "ui_click", "chime"};
+                                  "summon", "unsummon", "thunder", "owl", "marmot", "raven", "ui_click", "chime"};
     int loaded = 0;
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
         char rel[96];

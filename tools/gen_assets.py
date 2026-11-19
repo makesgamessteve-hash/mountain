@@ -1736,6 +1736,21 @@ def s_marmot():
     put_at(x, ns(0.32), 0.18 * sfilt(w, hi=2500), wrap=False)
     return finish(reverb(x, rng, 0.8, 0.25), -6, fade_out=0.25)
 
+def s_raven():
+    """Two hoarse croaks: a low, harmonic-rich voice with a rough, buzzing edge."""
+    rng, n = R(530), ns(1.4)
+    x = np.zeros(n)
+    for t0, d, f0, f1 in ((0.05, 0.26, 360, 300), (0.48, 0.3, 340, 270)):
+        m = ns(d)
+        tm = np.linspace(0, 1, m)
+        f = f0 + (f1 - f0) * tm + 25 * np.sin(2 * np.pi * 31 * tm * d)
+        e = smooth(0, 0.08, tm) * smooth(1, 0.6, tm)
+        v = sweep(f, e, ((1, 0.6), (2, 1.0), (3, 0.8), (4, 0.55), (5, 0.4), (6, 0.25), (8, 0.12)))
+        v *= 1 + 0.35 * np.sign(np.sin(2 * np.pi * 70 * tm * d))  # the rasp
+        v += 0.25 * e * noise(rng, m, lo=600, hi=2600)
+        put_at(x, ns(t0), sfilt(v, lo=150, hi=3500), wrap=False)
+    return finish(reverb(x, rng, 1.0, 0.3), -6, fade_out=0.2)
+
 def s_click():
     rng, n = R(528), ns(0.06)
     x = decay(n, 1500, 0.005) + 0.35 * decay(n, 3100, 0.0025) + 0.25 * burst(rng, n, 0.0008, lo=2000, hi=7000)
@@ -1754,7 +1769,7 @@ def make_sounds():
         for v in (1, 2):
             snd["step_%s_%d" % (name, v)] = s_step(k, v - 1)
     snd.update(door_open=s_door_open(), door_close=s_door_close(), shutter=s_shutter(), summon=s_summon(True),
-               unsummon=s_summon(False), thunder=s_thunder(), owl=s_owl(), marmot=s_marmot(),
+               unsummon=s_summon(False), thunder=s_thunder(), owl=s_owl(), marmot=s_marmot(), raven=s_raven(),
                ui_click=s_click(), chime=s_chime())
     return snd
 

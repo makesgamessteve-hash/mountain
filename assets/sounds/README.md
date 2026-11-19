@@ -48,6 +48,7 @@ file can be played on repeat with no seam or crossfade at runtime:
 | `thunder.wav`    | 3.20 s | Distant rolling thunder |
 | `owl.wav`        | 1.90 s | Two-note hoot with night reverb |
 | `marmot.wav`     | 1.00 s | Short alpine marmot alarm whistle (0.3 s) with mountain echo tail |
+| `raven.wav`      | 1.40 s | Two hoarse, rasping raven croaks |
 | `ui_click.wav`   | 0.06 s | Soft UI tick |
 | `chime.wav`      | 1.60 s | Pleasant UI bell (C6 with a G6 fifth) |
 
