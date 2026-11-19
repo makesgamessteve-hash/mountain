@@ -26,6 +26,7 @@ extern void mtn_js_sync_fs(void);
 extern void mtn_js_xr_init(void);
 extern int mtn_js_xr_supported(void);
 extern void mtn_js_set_title(const char *t);
+extern void mtn_js_ready(void);
 #define PLATFORM_NAME "web"
 #elif defined(_WIN32)
 #define PLATFORM_NAME "windows"
@@ -716,6 +717,7 @@ static void web_frame(void *ud) {
     }
     a->g.xr_supported = mtn_js_xr_supported();
     frame(a, frame_dt(a));
+    if (a->g.frame == 2) mtn_js_ready();
 }
 
 EMSCRIPTEN_KEEPALIVE void mtn_web_touch_hint(int is_touch) {

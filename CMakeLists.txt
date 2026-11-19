@@ -78,10 +78,10 @@ endif()
 # ---------------------------------------------------------------- game
 if(MTN_BUILD_GAME)
   if(EMSCRIPTEN)
-    add_library(SDL3::SDL3 INTERFACE IMPORTED)
-    target_compile_options(SDL3::SDL3 INTERFACE "--use-port=sdl3")
-    target_link_options(SDL3::SDL3 INTERFACE "--use-port=sdl3")
-  else()
+    # emscripten's find_package only searches the sysroot unless told otherwise
+    set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+  endif()
+  if(TRUE)
     find_package(SDL3 CONFIG QUIET)
     if(NOT SDL3_FOUND)
       if(NOT MTN_FETCH_SDL)
@@ -122,9 +122,11 @@ if(MTN_BUILD_GAME)
       -sEXPORTED_FUNCTIONS=_main,_mtn_web_xr_frame,_mtn_web_xr_ended,_mtn_web_touch_hint,_malloc,_free
       -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPF32,HEAPU8
       --js-library ${CMAKE_SOURCE_DIR}/web/mountain_lib.js
+      --pre-js ${CMAKE_SOURCE_DIR}/web/pre.js
       --shell-file ${CMAKE_SOURCE_DIR}/web/shell.html
       --preload-file ${CMAKE_SOURCE_DIR}/assets@/assets
       --exclude-file "*/README.md"
+      -lidbfs.js
       -O2)
   elseif(WIN32)
     if(TARGET SDL3::SDL3-shared)

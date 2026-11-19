@@ -90,7 +90,10 @@ local walk_actions = {
   camera = function() camera.mode(true); state.help = 0 end,
   gallery = function() state.gallery = true; state.gallery_index = 1; ui.modal(true) end,
   menu = function() state.menu = true; ui.modal(true) end,
-  shoot = function() camera.mode(true) end,
+  shoot = function()
+    local _, active = engine.xr()
+    if active then camera.shoot() else camera.mode(true) end
+  end,
 }
 
 local global_actions = {

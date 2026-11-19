@@ -7,7 +7,9 @@ int mtn_test_failures = 0;
 int mtn_test_checks = 0;
 const char *mtn_test_current = "";
 
-#define SUITES(X) X(math) X(rng) X(terrain)
+#define SUITES(X)                                                                                  \
+    X(math) X(rng) X(terrain) X(sky) X(weather) X(mesh) X(flora) X(fauna) X(player) X(house) X(room) \
+        X(photo) X(input) X(audio) X(vfs) X(game) X(script)
 
 #define DECL(n) void mtn_suite_##n(void);
 SUITES(DECL)

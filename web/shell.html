@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#14110e">
+<title>Mountain</title>
+<style>
+  :root { --bg: #14110e; --fg: #efe6d6; --accent: #e9c27a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font-family: ui-monospace, "Courier New", monospace; overscroll-behavior: none; }
+  canvas#canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none;
+    image-rendering: pixelated; outline: none; }
+  #loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; background: var(--bg); z-index: 2; text-align: center; padding: 16px; }
+  #loading h1 { margin: 0; font-size: 28px; letter-spacing: 6px; color: var(--accent); font-weight: normal; }
+  #bar { width: min(320px, 80vw); height: 6px; background: #3a3128; }
+  #bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  #status { font-size: 13px; opacity: .8; }
+  #vr-button { position: fixed; right: 16px; bottom: 16px; z-index: 3; display: none; padding: 10px 16px;
+    background: rgba(20,17,14,.8); color: var(--fg); border: 1px solid var(--accent); font: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="loading"><h1>MOUNTAIN</h1><div id="bar"><div></div></div><div id="status">Loading the mountain...</div></div>
+<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<button id="vr-button" onclick="Module.mtnEnterVR && Module.mtnEnterVR()">Enter VR</button>
+<script>
+  var bar = document.querySelector('#bar > div'), statusEl = document.getElementById('status');
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    setStatus: function (text) {
+      var m = text.match(/\((\d+(\.\d+)?)\/(\d+)\)/);
+      if (m) bar.style.width = (100 * parseInt(m[1]) / parseInt(m[3])) + '%';
+      if (text) statusEl.textContent = text.replace(/\(.*\)/, '');
+    },
+    monitorRunDependencies: function (left) { if (!left) statusEl.textContent = 'Generating the mountain...'; },
+    onRuntimeInitialized: function () {},
+    print: function (t) { console.log(t); },
+    printErr: function (t) { console.warn(t); },
+  };
+  window.addEventListener('touchstart', function () {
+    if (Module._mtn_web_touch_hint) Module._mtn_web_touch_hint(1);
+  }, { passive: true, once: true });
+  window.addEventListener('error', function (e) { statusEl.textContent = 'Error: ' + e.message; });
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
