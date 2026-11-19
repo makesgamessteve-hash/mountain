@@ -162,7 +162,7 @@ void mtn_mixer_mix(mtn_mixer *m, float *out, int frames) {
             int idx = (int)v->pos;
             if (idx >= s->count) {
                 if (v->loop && s->count > 0) {
-                    v->pos -= (double)s->count;
+                    v->pos = fmod(v->pos, (double)s->count); /* step may exceed the loop length */
                     idx = (int)v->pos;
                 } else {
                     v->active = 0;

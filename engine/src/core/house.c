@@ -353,19 +353,14 @@ static uint32_t stone_color(const mtn_terrain *t, vec3 p) {
 
 static void wall_with_hole(bctx *b, int axis_x, float fixed, float a0, float a1, float y0, float y1, float h0, float h1,
                            float v0, float v1, float thick, uint32_t col, int tile, float uvs) {
-    /* builds a log wall as boxes around an optional hole [h0,h1] x [v0,v1]; axis_x: wall runs along x */
+    /* builds a log wall as boxes around a hole [h0,h1] x [v0,v1] (door or window); axis_x: wall runs along x */
     float segs[4][4];
     int n = 0;
-    if (h1 <= h0) {
-        float s[4] = {a0, a1, y0, y1};
-        memcpy(segs[n++], s, sizeof s);
-    } else {
-        float s1[4] = {a0, h0, y0, y1}, s2[4] = {h1, a1, y0, y1}, s3[4] = {h0, h1, v1, y1}, s4[4] = {h0, h1, y0, v0};
-        memcpy(segs[n++], s1, sizeof s1);
-        memcpy(segs[n++], s2, sizeof s2);
-        if (v1 < y1) memcpy(segs[n++], s3, sizeof s3);
-        if (v0 > y0) memcpy(segs[n++], s4, sizeof s4);
-    }
+    float s1[4] = {a0, h0, y0, y1}, s2[4] = {h1, a1, y0, y1}, s3[4] = {h0, h1, v1, y1}, s4[4] = {h0, h1, y0, v0};
+    memcpy(segs[n++], s1, sizeof s1);
+    memcpy(segs[n++], s2, sizeof s2);
+    if (v1 < y1) memcpy(segs[n++], s3, sizeof s3);
+    if (v0 > y0) memcpy(segs[n++], s4, sizeof s4);
     for (int i = 0; i < n; i++) {
         if (axis_x) box(b, v3(segs[i][0], segs[i][2], fixed - thick), v3(segs[i][1], segs[i][3], fixed), col, tile, MTN_VF_SNOW, uvs);
         else box(b, v3(fixed - thick, segs[i][2], segs[i][0]), v3(fixed, segs[i][3], segs[i][1]), col, tile, MTN_VF_SNOW, uvs);

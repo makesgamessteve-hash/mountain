@@ -43,6 +43,8 @@ int mtn_house_room_type_for(const mtn_house *h, int index) {
     if (k == 1) return types[0];
     int i = index - 1;
     int block = i / k, pos = i % k;
+    /* two types can only alternate (the swap below would change the previous block's last room) */
+    if (k == 2) block = 0;
     int perm[MTN_MAX_ROOM_TYPES], prev[MTN_MAX_ROOM_TYPES];
     block_perm(h, block, types, k, perm);
     if (block > 0) {
