@@ -1,0 +1,41 @@
+schema: spec-driven
+
+# Project context (optional)
+# Add only constraints that should guide OpenSpec artifacts and workflows.
+# Include constraints an agent cannot infer by reading the code.
+# Keep general project documentation and discoverable codebase facts out.
+# Example:
+#   context: |
+#     Designs and tasks must cover Windows, macOS, and Linux
+#     Write all artifacts in Spanish
+context: |
+  Mountain is a relaxing retro-3D hiking game.
+  Engine: C17 core + SDL3 + OpenGL 3.3 core (desktop) / OpenGL ES 3.0 = WebGL2 (web).
+  Game logic and content: Lua 5.4 scripts (vendored); engine stays generic and data-driven.
+  Targets: Windows x64, Linux x64, Web (Emscripten/WebAssembly) and WebXR; touch controls on mobile web.
+  Assets (scripts, shaders, textures, sounds, fonts) live in folders beside the binary, never baked in.
+  Licensing: code MIT, art and sound assets CC BY 4.0.
+  Quality gate: >=95% line coverage of engine sources (third-party excluded) plus automated headless game tests in CI.
+  Branches: main for development; gh-pages holds only the published web build.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

@@ -1,0 +1,12 @@
+/build/
+/build-*/
+*.o
+*.obj
+*.gcda
+*.gcno
+*.gcov
+/coverage/
+__pycache__/
+.DS_Store
+/photos/
+/node_modules/
