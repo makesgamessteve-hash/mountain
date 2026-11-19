@@ -10,10 +10,13 @@ chain of cozy rooms inside, each with a big window onto the mountain.
 **Play in the browser:** <https://makesgamessteve-hash.github.io/mountain/>
 (desktop, phones and tablets with touch controls, and VR headsets via WebXR).
 
+![A winter view from the summit](docs/images/winter_summit.png)
+
 | | |
 |---|---|
 | ![The magic house with its door open](docs/images/door.png) | ![Inside the cabin](docs/images/cabin.png) |
-| ![Autumn in the forest](docs/images/autumn.png) | ![The photo gallery room](docs/images/gallery_room.png) |
+| ![A tree house at dusk](docs/images/treehouse_dusk.png) | ![Autumn in the forest](docs/images/autumn.png) |
+| ![The photo gallery room](docs/images/gallery_room.png) | |
 
 ## Features
 
