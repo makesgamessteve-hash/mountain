@@ -30,7 +30,11 @@ onto the mountain.
   the forest and the meadows, zigzags up the flanks (never steeper than 30%)
   and ends on the summit. It is level across, built up with dry-stone walls
   where the slope falls away, and marked with red-white-red posts every 40 m,
-  cairns every 80 m and a signpost at the trailhead.
+  cairns every 80 m and a signpost at the trailhead. Switchbacks have level
+  landings, and the path edge keeps you on it where it is built up.
+- **Easy walking**: ledges up to 0.6 m are stepped up automatically; walk into
+  a ledge up to 1.2 m (the edge of a built-up stretch, a porch) and you climb
+  onto it after a moment. Steep slopes and higher walls still stop you.
 - **Sky and time**: sun path by latitude and season, moon(s) with correctly lit
   phases, stars and the milky way, sunsets, a cloud layer. Planets are data:
   more moons or another sky are a script change away.

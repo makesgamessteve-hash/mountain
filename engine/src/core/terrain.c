@@ -531,7 +531,7 @@ static void index_trail(mtn_terrain *t) {
     free(fill);
 }
 
-int mtn_terrain_trail_nearest(const mtn_terrain *t, float x, float z, vec3 *closest) {
+int mtn_terrain_trail_nearest_level(const mtn_terrain *t, float x, float z, float ref_y, float tol, vec3 *closest) {
     if (!t->trail_cell_start || t->trail_len < 2) return 0;
     int cx = (int)floorf(x / t->cell), cz = (int)floorf(z / t->cell);
     if (cx < 0 || cz < 0 || cx >= t->n || cz >= t->n) return 0;
@@ -545,6 +545,7 @@ int mtn_terrain_trail_nearest(const mtn_terrain *t, float x, float z, vec3 *clos
         float l2 = ab.x * ab.x + ab.z * ab.z;
         float f = l2 > 1e-8f ? mtn_clampf(((x - a.x) * ab.x + (z - a.z) * ab.z) / l2, 0.0f, 1.0f) : 0.0f;
         vec3 p = v3_lerp(a, b, f);
+        if (fabsf(p.y - ref_y) > tol) continue;
         float d = v3_dist_xz(p, q);
         if (d < best) {
             best = d;
@@ -554,10 +555,46 @@ int mtn_terrain_trail_nearest(const mtn_terrain *t, float x, float z, vec3 *clos
     return best < 1e29f;
 }
 
-int mtn_terrain_trail_surface(const mtn_terrain *t, float x, float z, float *y) {
-    vec3 c;
-    if (!mtn_terrain_trail_nearest(t, x, z, &c) || v3_dist_xz(c, v3(x, 0, z)) > MTN_TRAIL_WIDTH * 0.5f) return 0;
-    *y = c.y;
+int mtn_terrain_trail_nearest(const mtn_terrain *t, float x, float z, vec3 *closest) {
+    return mtn_terrain_trail_nearest_level(t, x, z, 0.0f, 1e30f, closest);
+}
+
+int mtn_terrain_trail_surface(const mtn_terrain *t, float x, float z, float ref_y, float *y) {
+    if (!t->trail_cell_start || t->trail_len < 2) return 0;
+    int cx = (int)floorf(x / t->cell), cz = (int)floorf(z / t->cell);
+    if (cx < 0 || cz < 0 || cx >= t->n || cz >= t->n) return 0;
+    int c = cz * t->n + cx, n = 0, ks[48];
+    float hs[48], ws[48];
+    /* every stretch of path within reach: its height and how close it runs */
+    for (int i = t->trail_cell_start[c]; i < t->trail_cell_start[c + 1] && n < 48; i++) {
+        int k = t->trail_cell_items[i];
+        vec3 a = t->trail[k], b = t->trail[k + 1];
+        vec3 ab = v3(b.x - a.x, 0, b.z - a.z);
+        float l2 = ab.x * ab.x + ab.z * ab.z;
+        float f = l2 > 1e-8f ? mtn_clampf(((x - a.x) * ab.x + (z - a.z) * ab.z) / l2, 0.0f, 1.0f) : 0.0f;
+        vec3 p = v3_lerp(a, b, f);
+        float d = v3_dist_xz(p, v3(x, 0, z));
+        if (d > MTN_TRAIL_WALK_HALF) continue;
+        hs[n] = p.y;
+        ks[n] = k;
+        float e = (MTN_TRAIL_WALK_HALF - d) * (MTN_TRAIL_WALK_HALF - d);
+        ws[n] = e * e + 1e-9f;
+        n++;
+    }
+    if (!n) return 0;
+    /* the stretch nearest the walker's feet, blended with its neighbours along the path:
+     * the surface has no steps at bends, and another leg of the path (crossing, or
+     * passing above or below) does not count */
+    int best = 0;
+    for (int i = 1; i < n; i++)
+        if (fabsf(hs[i] - ref_y) < fabsf(hs[best] - ref_y)) best = i;
+    float sum = 0.0f, wsum = 0.0f;
+    for (int i = 0; i < n; i++)
+        if (abs(ks[i] - ks[best]) <= 8 && fabsf(hs[i] - hs[best]) < 1.0f) {
+            sum += hs[i] * ws[i];
+            wsum += ws[i];
+        }
+    *y = sum / wsum;
     return 1;
 }
 
@@ -568,6 +605,7 @@ typedef struct {
     float *g;
     int *from;
     uint8_t *closed;
+    uint8_t *used; /* grid points next to the legs routed so far */
     int *path;
     int len, cap;
 } trail_work;
@@ -609,6 +647,8 @@ static int route_leg(const mtn_terrain *t, trail_work *w, int start, int goal) {
             if (t->water[j] != MTN_NO_WATER) cost *= 80.0f;
             if (!mtn_terrain_in_playable(t, wx, wz)) cost *= 20.0f;
             if (t->biome[j] == MTN_BIOME_ROCK) cost *= 1.5f;
+            /* keep away from the earlier legs (no crossings), except where this leg starts */
+            if (w->used[j] && abs(x - (start % n)) + abs(z - (start / n)) > 4) cost *= 6.0f;
             float ng = w->g[c.i] + cost;
             if (ng < w->g[j]) {
                 w->g[j] = ng;
@@ -629,6 +669,13 @@ static int route_leg(const mtn_terrain *t, trail_work *w, int start, int goal) {
     int k = w->len + count;
     for (int c = goal; c != start && c >= 0; c = w->from[c]) w->path[--k] = c;
     w->len += count;
+    /* mark the new leg and its surroundings for the next legs */
+    for (int i = w->len - count; i < w->len; i++) {
+        int px = w->path[i] % n, pz = w->path[i] / n;
+        for (int dz = -1; dz <= 1; dz++)
+            for (int dx = -1; dx <= 1; dx++)
+                if (px + dx >= 0 && pz + dz >= 0 && px + dx < n && pz + dz < n) w->used[(pz + dz) * n + px + dx] = 1;
+    }
     return 1;
 }
 
@@ -667,7 +714,7 @@ static void place_markers(mtn_terrain *t) {
         vec3 side = v3(-dir.z, 0, dir.x);
         if (i % 40 == 0 && i + 1 < t->trail_len) {
             float sgn = (i / 40) % 2 ? 1.0f : -1.0f;
-            vec3 c = v3_add(t->trail[i], v3_scale(side, 2.1f * sgn));
+            vec3 c = v3_add(t->trail[i], v3_scale(side, 2.7f * sgn)); /* clear of the walkable edge */
             c.y = mtn_terrain_height(t, c.x, c.z);
             t->cairns[t->cairn_count++] = c;
         }
@@ -776,6 +823,33 @@ static int string_pull(const mtn_terrain *t, vec3 *pts, int count) {
     return o;
 }
 
+/* The grade-limited profile closest to ys: the largest grade-limited profile below and
+ * the smallest above, averaged; both ends stay at their height (the summit is not cut
+ * down) when the length allows it. Result in out; tmp is scratch. */
+static void grade_limit(const float *ys, const float *s_at, int tl, float y0, float y1, float len, float *out, float *tmp) {
+    float *lo = out, *hi = tmp;
+    for (int i = 0; i < tl; i++) lo[i] = hi[i] = ys[i];
+    for (int i = 1; i < tl; i++) {
+        float ds = (s_at[i] - s_at[i - 1]) * MTN_TRAIL_MAX_GRADE;
+        lo[i] = fminf(lo[i], lo[i - 1] + ds);
+        hi[i] = fmaxf(hi[i], hi[i - 1] - ds);
+    }
+    for (int i = tl - 2; i >= 0; i--) {
+        float ds = (s_at[i + 1] - s_at[i]) * MTN_TRAIL_MAX_GRADE;
+        lo[i] = fminf(lo[i], lo[i + 1] + ds);
+        hi[i] = fmaxf(hi[i], hi[i + 1] - ds);
+    }
+    int pin = fabsf(y1 - y0) <= len * MTN_TRAIL_MAX_GRADE;
+    for (int i = 0; i < tl; i++) {
+        float p = 0.5f * (lo[i] + hi[i]);
+        if (pin) {
+            float a = s_at[i] * MTN_TRAIL_MAX_GRADE, b = (len - s_at[i]) * MTN_TRAIL_MAX_GRADE;
+            p = mtn_clampf(p, fmaxf(y0 - a, y1 - b), fminf(y0 + a, y1 + b));
+        }
+        out[i] = p;
+    }
+}
+
 int mtn_terrain_find_trail(mtn_terrain *t) {
     int n = t->n;
     size_t nn = (size_t)n * (size_t)n;
@@ -783,6 +857,7 @@ int mtn_terrain_find_trail(mtn_terrain *t) {
     w.g = malloc(sizeof(float) * nn);
     w.from = malloc(sizeof(int) * nn);
     w.closed = malloc(nn);
+    w.used = calloc(nn, 1);
     int start = mtn_clampi((int)lroundf(t->trailhead.z / t->cell), 0, n - 1) * n +
                 mtn_clampi((int)lroundf(t->trailhead.x / t->cell), 0, n - 1);
     int goal = mtn_clampi((int)lroundf(t->summit.z / t->cell), 0, n - 1) * n +
@@ -811,6 +886,7 @@ int mtn_terrain_find_trail(mtn_terrain *t) {
     free(w.g);
     free(w.from);
     free(w.closed);
+    free(w.used);
     int count = w.len;
     vec3 *raw = malloc(sizeof(vec3) * (size_t)count);
     for (int i = 0; i < count; i++) raw[i] = v3((float)(w.path[i] % n) * t->cell, 0, (float)(w.path[i] / n) * t->cell);
@@ -896,31 +972,22 @@ int mtn_terrain_find_trail(mtn_terrain *t) {
         ys[i] = sum / (float)c;
         s_at[i] = i > 0 ? s_at[i - 1] + v3_dist_xz(t->trail[i - 1], t->trail[i]) : 0.0f;
     }
-    /* limit the grade: the largest grade-limited profile below and the smallest above the
-     * terrain profile, averaged; the terrain is then cut or filled to it */
-    for (int i = 0; i < tl; i++) lo[i] = hi[i] = ys[i];
-    for (int i = 1; i < tl; i++) {
-        float ds = (s_at[i] - s_at[i - 1]) * MTN_TRAIL_MAX_GRADE;
-        lo[i] = fminf(lo[i], lo[i - 1] + ds);
-        hi[i] = fmaxf(hi[i], hi[i - 1] - ds);
-    }
-    for (int i = tl - 2; i >= 0; i--) {
-        float ds = (s_at[i + 1] - s_at[i]) * MTN_TRAIL_MAX_GRADE;
-        lo[i] = fminf(lo[i], lo[i + 1] + ds);
-        hi[i] = fmaxf(hi[i], hi[i + 1] - ds);
-    }
-    /* both ends stay at the terrain height (the summit is not cut down) when the
-     * length allows it: keep the profile inside the cones of the two end points */
-    float y0 = ys[0], y1 = ys[tl - 1], len = s_at[tl - 1];
-    int pin = fabsf(y1 - y0) <= len * MTN_TRAIL_MAX_GRADE;
-    for (int i = 0; i < tl; i++) {
-        float p = 0.5f * (lo[i] + hi[i]);
-        if (pin) {
-            float a = s_at[i] * MTN_TRAIL_MAX_GRADE, b = (len - s_at[i]) * MTN_TRAIL_MAX_GRADE;
-            p = mtn_clampf(p, fmaxf(y0 - a, y1 - b), fminf(y0 + a, y1 + b));
-        }
-        t->trail[i].y = p;
-    }
+    /* landings: where the path doubles back on itself (the tip of a switchback) the
+     * stretch from one leg to the other is level, so turning there needs no step. The
+     * grade limit below sees no length inside a landing, which keeps it level. */
+    float *s_lim = malloc(sizeof(float) * (size_t)tl);
+    uint8_t *flat = calloc((size_t)tl, 1);
+    for (int i = 0; i < tl; i++)
+        for (int j = i + 3; j < tl && j <= i + 12; j++)
+            if (v3_dist_xz(t->trail[i], t->trail[j]) < 2.0f * MTN_TRAIL_WALK_HALF + 0.3f)
+                for (int k = i + 1; k <= j; k++) flat[k] = 1;
+    s_lim[0] = 0.0f;
+    for (int i = 1; i < tl; i++) s_lim[i] = s_lim[i - 1] + (flat[i] ? 0.0f : s_at[i] - s_at[i - 1]);
+    grade_limit(ys, s_lim, tl, ys[0], ys[tl - 1], s_lim[tl - 1], lo, hi);
+    for (int i = 0; i < tl; i++) ys[i] = lo[i];
+    free(s_lim);
+    free(flat);
+    for (int i = 0; i < tl; i++) t->trail[i].y = ys[i];
     free(ys);
     free(lo);
     free(hi);

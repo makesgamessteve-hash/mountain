@@ -275,13 +275,35 @@ static void test_slopes(void) {
     CHECK(p.on_ground);
     CHECK_NEAR(p.pos.y, w_ground(&w, p.pos.x, 0, &(vec3){0}, &(int){0}), 1e-4);
 
-    /* a wall-like step (flat on top) cannot be walked up, a small curb can */
+    /* a step up to the step height is walked up at once, the eye follows smoothly */
     w.feature = 2;
     w.height = 0.5f;
     mtn_player_init(&p, v3(0, 0, 0), MTN_PI * 0.5f);
     walk_east(&p, &c, 200, &blocked);
-    CHECK(blocked > 0);
+    CHECK(blocked == 0);
+    CHECK(p.pos.x > 3.0f);
+    CHECK_NEAR(p.pos.y, 0.5f, 1e-6);
+    mtn_player_init(&p, v3(0.7f, 0, 0), MTN_PI * 0.5f);
+    walk_east(&p, &c, 12, &blocked);
+    CHECK(p.pos.y == 0.5f && p.step_lag > 0.1f); /* just stepped up: the eye lags */
+    CHECK(mtn_player_eye(&p).y < 0.5f + p.eye_height - 0.05f);
+    walk_east(&p, &c, 60, &blocked);
+    CHECK(p.step_lag < 0.01f);
+    /* a higher ledge (up to the climb height) is climbed after pushing into it a moment */
+    w.height = 1.0f;
+    mtn_player_init(&p, v3(0, 0, 0), MTN_PI * 0.5f);
+    walk_east(&p, &c, 200, &blocked);
+    CHECK(blocked > 0 && blocked < 30);
+    CHECK(p.pos.x > 3.0f);
+    CHECK_NEAR(p.pos.y, 1.0f, 1e-6);
+    /* a real wall is not */
+    w.height = 1.5f;
+    mtn_player_init(&p, v3(0, 0, 0), MTN_PI * 0.5f);
+    walk_east(&p, &c, 200, &blocked);
+    CHECK(blocked > 100);
     CHECK(p.pos.x <= 1.0f);
+    CHECK(p.pos.y < 0.1f);
+    CHECK(p.climb_timer == 0.0f);
     w.height = 0.02f;
     mtn_player_init(&p, v3(0, 0, 0), MTN_PI * 0.5f);
     walk_east(&p, &c, 200, &blocked);
@@ -289,9 +311,10 @@ static void test_slopes(void) {
     CHECK(p.pos.x > 3.0f);
     CHECK_NEAR(p.pos.y, 0.02f, 1e-6);
 
-    /* ... but jumping up the step works (the slope limit only applies on the ground) */
-    w.height = 0.5f;
+    /* ... and jumping up a ledge works without climbing (the slope limit only applies on the ground) */
+    w.height = 0.9f;
     mtn_player_init(&p, v3(0.8f, 0, 0), MTN_PI * 0.5f);
+    p.climb_height = p.step_height; /* no climbing: only the jump gets up there */
     mtn_move_input in = input(0, 1);
     for (int i = 0; i < 30; i++) mtn_player_update(&p, &in, &c, DT); /* gain speed against the step */
     in.jump = 1;
@@ -300,7 +323,7 @@ static void test_slopes(void) {
         in.jump = 0;
     }
     CHECK(p.pos.x > 1.2f);
-    CHECK_NEAR(p.pos.y, 0.5f, 1e-6);
+    CHECK_NEAR(p.pos.y, 0.9f, 1e-6);
     CHECK(p.on_ground);
 }
 

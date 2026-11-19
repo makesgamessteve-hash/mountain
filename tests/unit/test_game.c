@@ -5,6 +5,7 @@
 #include "mtn/game.h"
 #include "mtn/vfs.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 #ifndef MTN_SOURCE_DIR
@@ -247,6 +248,83 @@ static void test_house_flow(void) {
     mtn_test_game_free(g);
 }
 
+/* A hiker bot follows the whole trail at a run and never gets stuck; from beside the
+ * path it steps (or climbs) onto it wherever the edge is not a real wall. */
+static void test_hike_the_trail(void) {
+    mtn_game *g = mtn_test_game();
+    g->tparams.size = 257;
+    g->tparams.cell = 12.0f;
+    g->tparams.erosion_drops = 6000;
+    mtn_game_new_world(g, 4242);
+    mtn_terrain *t = &g->terrain;
+    CHECK(t->trail_len > 200);
+    const float dt = 1.0f / 30.0f;
+    int idx = 0, last = 0, still = 0, stuck = 0, frames = 0;
+    mtn_input_set(&g->input, MTN_ACT_RUN, 1);
+    while (idx < t->trail_len - 4 && frames < 30 * 3000) {
+        vec3 p = g->player.pos;
+        float bd = 1e9f;
+        for (int k = idx; k < idx + 30 && k < t->trail_len; k++) {
+            float d = v3_dist_xz(p, t->trail[k]);
+            if (fabsf(t->trail[k].y - p.y) < 1.5f && d < bd) {
+                bd = d;
+                idx = k;
+            }
+        }
+        vec3 to = t->trail[mtn_clampi(idx + 2, 0, t->trail_len - 1)];
+        g->player.yaw = atan2f(to.x - p.x, -(to.z - p.z));
+        mtn_input_set(&g->input, MTN_ACT_FORWARD, 1);
+        mtn_game_update(g, dt);
+        mtn_input_begin_frame(&g->input);
+        frames++;
+        if (idx > last) {
+            last = idx;
+            still = 0;
+        } else if (++still > 60) { /* two seconds without progress */
+            stuck++;
+            g->player.pos = t->trail[mtn_clampi(idx + 3, 0, t->trail_len - 1)];
+            g->player.vel = v3(0, 0, 0);
+            idx += 3;
+            still = 0;
+        }
+    }
+    CHECK(stuck == 0);
+    CHECK(idx >= t->trail_len - 5);
+    mtn_input_set(&g->input, MTN_ACT_RUN, 0);
+    /* onto the path from three metres beside it */
+    int tries = 0, fails = 0;
+    for (int i = 10; i + 2 < t->trail_len; i += 37)
+        for (int sd = -1; sd <= 1; sd += 2) {
+            vec3 a = t->trail[i], b = t->trail[i + 1];
+            vec3 d = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
+            vec3 side = v3(-d.z * (float)sd, 0, d.x * (float)sd);
+            vec3 st = v3_add(a, v3_scale(side, 3.0f));
+            st.y = mtn_terrain_height(t, st.x, st.z);
+            float hs, edge = a.y - mtn_terrain_height(t, a.x + side.x * 1.6f, a.z + side.z * 1.6f);
+            int near_cairn = 0;
+            for (int k = 0; k < t->cairn_count; k++) near_cairn |= v3_dist_xz(t->cairns[k], st) < 4.0f;
+            if (near_cairn || edge > 1.1f || mtn_terrain_normal(t, st.x, st.z).y < 0.7f ||
+                mtn_terrain_trail_surface(t, st.x, st.z, st.y, &hs) || mtn_terrain_water(t, st.x, st.z) != MTN_NO_WATER)
+                continue;
+            g->player.pos = st;
+            g->player.vel = v3(0, 0, 0);
+            g->player.on_ground = 1;
+            g->player.yaw = atan2f(a.x - st.x, -(a.z - st.z));
+            mtn_input_set(&g->input, MTN_ACT_FORWARD, 1);
+            for (int f = 0; f < 90 && v3_dist_xz(g->player.pos, a) > 0.3f; f++) {
+                mtn_game_update(g, dt);
+                mtn_input_begin_frame(&g->input);
+            }
+            mtn_input_set(&g->input, MTN_ACT_FORWARD, 0);
+            tries++;
+            fails += !(mtn_terrain_trail_surface(t, g->player.pos.x, g->player.pos.z, g->player.pos.y, &hs) &&
+                       fabsf(g->player.pos.y - hs) < 0.1f);
+        }
+    CHECK(tries > 10);
+    CHECK(fails == 0);
+    mtn_test_game_free(g);
+}
+
 static void test_site_failure_and_trailhead(void) {
     mtn_game *g = mtn_test_game();
     /* standing at the edge of the world facing outwards: no site */
@@ -305,6 +383,7 @@ MTN_SUITE(game) {
     TEST_RUN(test_sounds_and_messages);
     TEST_RUN(test_simulation);
     TEST_RUN(test_house_flow);
+    TEST_RUN(test_hike_the_trail);
     TEST_RUN(test_site_failure_and_trailhead);
     TEST_RUN(test_water_and_surfaces);
 }

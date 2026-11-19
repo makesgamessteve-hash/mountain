@@ -174,12 +174,15 @@ static float world_ground(void *ctx, float x, float z, vec3 *n, int *surface) {
     float w = mtn_terrain_water(&g->terrain, x, z);
     if (w != MTN_NO_WATER && w > h + 0.05f) *surface = MTN_SURF_WATER;
     float hs;
-    if (mtn_terrain_trail_surface(&g->terrain, x, z, &hs) && hs > h && hs <= g->player.pos.y + 0.75f) {
-        h = hs; /* the built-up path is level across */
+    /* on the path: its level surface, also where the coarse terrain pokes a little
+     * above it (the steep cut beside the path never counts as a slope to climb) */
+    if (mtn_terrain_trail_surface(&g->terrain, x, z, g->player.pos.y, &hs) && hs > h - 0.3f &&
+        hs <= g->player.pos.y + MTN_CLIMB_HEIGHT) {
+        h = fmaxf(h, hs);
         *n = v3(0, 1, 0);
         *surface = MTN_SURF_ROCK;
     }
-    if (mtn_house_surface(&g->house, x, z, &hs) && hs > h - 0.05f && hs <= g->player.pos.y + 0.75f) {
+    if (mtn_house_surface(&g->house, x, z, &hs) && hs > h - 0.05f && hs <= g->player.pos.y + MTN_CLIMB_HEIGHT) {
         h = hs;
         *n = v3(0, 1, 0);
         *surface = MTN_SURF_WOOD;
@@ -192,10 +195,28 @@ static int world_push(void *ctx, vec3 *pos, float radius, float height) {
     (void)height;
     int hit = mtn_flora_collide(&g->flora, pos, radius);
     hit |= mtn_house_collide(&g->house, pos, radius);
+    { /* where the path is built up, its edge keeps the walker on it: slide along it
+       * instead of stepping off a drop (jumping still gets you down) */
+        vec3 o = g->player.pos, c;
+        float ho, hn;
+        if (g->player.on_ground && mtn_terrain_trail_surface(&g->terrain, o.x, o.z, o.y, &ho) && fabsf(ho - o.y) < 0.15f &&
+            !(mtn_terrain_trail_surface(&g->terrain, pos->x, pos->z, o.y, &hn) && fabsf(hn - o.y) < MTN_STEP_HEIGHT) &&
+            mtn_terrain_height(&g->terrain, pos->x, pos->z) < o.y - MTN_STEP_HEIGHT &&
+            mtn_terrain_trail_nearest_level(&g->terrain, pos->x, pos->z, o.y, MTN_STEP_HEIGHT, &c)) {
+            float d = v3_dist_xz(c, *pos), keep = MTN_TRAIL_WALK_HALF - 0.05f;
+            if (d > keep && d > 1e-4f) {
+                pos->x = c.x + (pos->x - c.x) / d * keep;
+                pos->z = c.z + (pos->z - c.z) / d * keep;
+                hit = 1;
+            }
+        }
+    }
     { /* the retaining wall of a built-up stretch of path is solid from below */
         vec3 c;
-        if (mtn_terrain_trail_nearest(&g->terrain, pos->x, pos->z, &c) && c.y > pos->y + 0.75f) {
-            float d = v3_dist_xz(c, *pos), min_d = MTN_TRAIL_WIDTH * 0.5f + radius;
+        float hs;
+        int on_path = mtn_terrain_trail_surface(&g->terrain, pos->x, pos->z, pos->y, &hs) && hs <= pos->y + MTN_CLIMB_HEIGHT;
+        if (!on_path && mtn_terrain_trail_nearest(&g->terrain, pos->x, pos->z, &c) && c.y > pos->y + MTN_CLIMB_HEIGHT) {
+            float d = v3_dist_xz(c, *pos), min_d = MTN_TRAIL_WALK_HALF + radius;
             if (d < min_d && d > 1e-4f) {
                 pos->x = c.x + (pos->x - c.x) / d * min_d;
                 pos->z = c.z + (pos->z - c.z) / d * min_d;

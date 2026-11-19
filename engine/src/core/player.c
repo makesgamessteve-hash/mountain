@@ -15,12 +15,14 @@ void mtn_player_init(mtn_player *p, vec3 pos, float yaw) {
     p->jump_speed = 4.4f; /* ~1 m jump */
     p->gravity = 9.81f;
     p->max_slope = 0.64f; /* about 50 degrees */
+    p->step_height = MTN_STEP_HEIGHT;
+    p->climb_height = MTN_CLIMB_HEIGHT;
     p->on_ground = 1;
 }
 
 vec3 mtn_player_eye(const mtn_player *p) {
     float bob = p->on_ground ? sinf(p->bob_phase * 2.0f) * 0.035f : 0.0f;
-    return v3(p->pos.x, p->pos.y + p->eye_height + bob, p->pos.z);
+    return v3(p->pos.x, p->pos.y + p->eye_height + bob - p->step_lag, p->pos.z);
 }
 
 vec3 mtn_player_forward(const mtn_player *p) {
@@ -71,9 +73,16 @@ void mtn_player_update(mtn_player *p, const mtn_move_input *in, const mtn_collid
     float gh_old = c->ground(c->ctx, old.x, old.z, &n, &surf);
     float gh_new = c->ground(c->ctx, np.x, np.z, &n, &surf);
     float horiz = v3_dist_xz(old, np);
+    if (horiz <= 1e-5f || !p->on_ground) p->climb_timer = 0.0f;
     if (horiz > 1e-5f && p->on_ground) {
         float rise = gh_new - gh_old;
-        if (rise > 0.0f && (n.y < p->max_slope || rise / horiz > 1.25f)) {
+        /* a ledge (the edge of the path, a porch, a stone) up to the step height is
+         * stepped up; anything else that climbs must be a gentle enough slope */
+        int ledge = rise > p->step_height && rise <= p->climb_height && n.y >= p->max_slope;
+        if (ledge) p->climb_timer += dt; /* pushing into a ledge: lift off after a moment */
+        int step = n.y >= p->max_slope && (rise <= p->step_height || (ledge && p->climb_timer >= MTN_CLIMB_DELAY));
+        if (!ledge) p->climb_timer = 0.0f;
+        if (rise > 0.0f && !step && (n.y < p->max_slope || rise / horiz > 1.25f)) {
             /* too steep: drop the uphill part of the move and slide along the slope */
             p->blocked = 1;
             vec3 up = v3_norm(v3(-n.x, 0, -n.z));
@@ -84,7 +93,8 @@ void mtn_player_update(mtn_player *p, const mtn_move_input *in, const mtn_collid
             vec3 n2;
             float gh_side = c->ground(c->ctx, sp.x, sp.z, &n2, &surf);
             float side = v3_len(along);
-            if (side > 1e-4f && (gh_side - gh_old <= 0.0f || (n2.y >= p->max_slope && (gh_side - gh_old) / side <= 1.25f))) {
+            float rs = gh_side - gh_old;
+            if (side > 1e-4f && (rs <= 0.0f || (n2.y >= p->max_slope && (rs <= p->step_height || rs / side <= 1.25f)))) {
                 np = sp;
                 float vin = v3_dot(v3(p->vel.x, 0, p->vel.z), up);
                 if (vin > 0.0f) {
@@ -107,13 +117,20 @@ void mtn_player_update(mtn_player *p, const mtn_move_input *in, const mtn_collid
     if (c->push_out && c->push_out(c->ctx, &np, p->radius, p->eye_height)) p->blocked = 1;
     float gh = c->ground(c->ctx, np.x, np.z, &n, &surf);
     p->surface = surf;
-    if (np.y <= gh || (p->on_ground && p->vel.y <= 0.0f && np.y - gh < 0.6f)) {
-        np.y = gh; /* land or follow the ground downhill */
+    int was_on_ground = p->on_ground;
+    if (np.y <= gh || (p->on_ground && p->vel.y <= 0.0f && np.y - gh < p->step_height + 0.05f)) {
+        if (gh - np.y > p->step_height) p->climb_timer = 0.0f; /* climbed up */
+        np.y = gh; /* land, step up or follow the ground downhill */
         p->vel.y = 0.0f;
         p->on_ground = 1;
     } else {
         p->on_ground = 0;
     }
+    /* a sudden step while walking: the eye follows smoothly instead of jumping */
+    float moved_xz = v3_dist_xz(old, np);
+    float dy = np.y - old.y;
+    if (was_on_ground && p->on_ground && fabsf(dy) > 0.04f + 1.25f * moved_xz) p->step_lag += dy;
+    p->step_lag = mtn_clampf(p->step_lag, -p->climb_height, p->climb_height) * expf(-(p->step_lag > 0.5f ? 7.0f : 12.0f) * dt);
     p->pos = np;
 
     float moved = v3_dist_xz(old, np);

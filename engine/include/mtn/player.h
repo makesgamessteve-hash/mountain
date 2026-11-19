@@ -4,6 +4,12 @@
 
 #include "mtn/math.h"
 
+/* ledges up to this height are stepped up automatically */
+#define MTN_STEP_HEIGHT 0.6f
+/* higher ledges up to this height are climbed after walking into them for a moment */
+#define MTN_CLIMB_HEIGHT 1.2f
+#define MTN_CLIMB_DELAY 0.25f
+
 typedef enum { MTN_SURF_GRASS = 0, MTN_SURF_ROCK, MTN_SURF_SNOW, MTN_SURF_WOOD, MTN_SURF_WATER } mtn_surface;
 
 /* Collision world: ground height/normal query and obstacle push-out. */
@@ -33,6 +39,10 @@ typedef struct {
     float radius;
     float walk_speed, run_speed, jump_speed, gravity;
     float max_slope;   /* minimum normal.y that can be climbed */
+    float step_height; /* ledges up to this height are stepped up (or down) automatically */
+    float climb_height;/* ledges up to this height are climbed after pushing into them */
+    float climb_timer; /* how long the walker has been pushing into a climbable ledge */
+    float step_lag;    /* the eye catches up smoothly after a step: offset in metres */
     float bob_phase;
     float step_dist;
     int surface;

@@ -136,7 +136,7 @@ static void test_trail_shape(void) {
             if (mtn_terrain_height(&t, x, z) > a.y + 0.05f) above++;
         }
         float y;
-        CHECK(mtn_terrain_trail_surface(&t, a.x, a.z, &y));
+        CHECK(mtn_terrain_trail_surface(&t, a.x, a.z, a.y, &y));
         CHECK_NEAR(y, a.y, 0.3f);
         biomes |= 1 << mtn_terrain_biome(&t, a.x, a.z);
     }
@@ -151,8 +151,11 @@ static void test_trail_shape(void) {
     vec3 c;
     CHECK(mtn_terrain_trail_nearest(&t, a.x - d.z * 2.0f, a.z + d.x * 2.0f, &c));
     CHECK(v3_dist_xz(c, a) < 2.5f);
-    CHECK(!mtn_terrain_trail_surface(&t, a.x - d.z * 2.0f, a.z + d.x * 2.0f, &y) ||
-          v3_dist_xz(c, v3(a.x - d.z * 2.0f, 0, a.z + d.x * 2.0f)) <= MTN_TRAIL_WIDTH * 0.5f);
+    CHECK(!mtn_terrain_trail_surface(&t, a.x - d.z * 2.0f, a.z + d.x * 2.0f, a.y, &y) ||
+          v3_dist_xz(c, v3(a.x - d.z * 2.0f, 0, a.z + d.x * 2.0f)) <= MTN_TRAIL_WALK_HALF);
+    /* a little beyond the visible edge is still path, a little more is not */
+    CHECK(mtn_terrain_trail_surface(&t, a.x - d.z * 1.35f, a.z + d.x * 1.35f, a.y, &y) || 0);
+    CHECK(!mtn_terrain_trail_surface(&t, -1000.0f, -1000.0f, 0.0f, &y));
     CHECK(!mtn_terrain_trail_nearest(&t, -1000.0f, -1000.0f, &c));
     /* markers: painted posts beside the path, a signpost and a cairn at the trailhead */
     CHECK(t.post_count > 10);
@@ -179,7 +182,7 @@ static void test_trail_surface_everywhere(void) {
         for (int i = 0; i + 1 < t.trail_len; i++) {
             vec3 m = v3_lerp(t.trail[i], t.trail[i + 1], 0.5f);
             float y = -1e9f;
-            if (!mtn_terrain_trail_surface(&t, m.x, m.z, &y) || fabsf(y - m.y) > 0.3f) missed++;
+            if (!mtn_terrain_trail_surface(&t, m.x, m.z, m.y, &y) || fabsf(y - m.y) > 0.05f) missed++;
         }
         CHECK(missed == 0);
         mtn_terrain_free(&t);

@@ -9,6 +9,7 @@
 #define MTN_NO_WATER (-1.0e9f)
 #define MTN_TRAIL_MAX_GRADE 0.30f /* rise per metre along the trail */
 #define MTN_TRAIL_WIDTH 2.4f
+#define MTN_TRAIL_WALK_HALF 1.4f /* the walkable path is a little wider than it looks */
 
 typedef enum {
     MTN_BIOME_WATER = 0,
@@ -86,8 +87,12 @@ float mtn_terrain_moisture(const mtn_terrain *t, float x, float z);
 float mtn_terrain_trail_distance(const mtn_terrain *t, float x, float z);
 /* Closest point on the trail centre line (y = path surface); 0 when far from the trail. */
 int mtn_terrain_trail_nearest(const mtn_terrain *t, float x, float z, vec3 *closest);
-/* Height of the level path surface when (x, z) is on the path strip. */
-int mtn_terrain_trail_surface(const mtn_terrain *t, float x, float z, float *y);
+/* Like mtn_terrain_trail_nearest, but only stretches of path whose surface is within
+ * tol of ref_y count (the stretch the walker is on, not the one above or below). */
+int mtn_terrain_trail_nearest_level(const mtn_terrain *t, float x, float z, float ref_y, float tol, vec3 *closest);
+/* Height of the level path surface when (x, z) is on the path. Where two stretches
+ * overlap (the tip of a switchback) the one nearest to ref_y (the walker's feet) wins. */
+int mtn_terrain_trail_surface(const mtn_terrain *t, float x, float z, float ref_y, float *y);
 int mtn_terrain_in_playable(const mtn_terrain *t, float x, float z);
 /* Clamp a position into the playable disc; returns 1 when it was moved. */
 int mtn_terrain_clamp_playable(const mtn_terrain *t, vec3 *p);

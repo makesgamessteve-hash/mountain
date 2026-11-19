@@ -64,7 +64,7 @@ Every terrain point SHALL be assigned a biome (forest, meadow, alpine, rock, scr
 - **THEN** the forest boundary follows the new tree-line altitude without rebuilding the executable
 
 ### Requirement: Marked hiking trail
-Each world SHALL contain one hiking trail, an easy to see path that winds from a trailhead at low altitude through forest, meadows and alpine terrain to the main summit. The trail MUST avoid water, keep a gentle grade (zigzagging up steep flanks), be level across its width and walkable as a surface of its own (built up with dry-stone walls where the slope falls away), and be marked by painted trail posts about every 40 m, stone cairns about every 80 m and a signpost at the trailhead.
+Each world SHALL contain one hiking trail, an easy to see path that winds from a low trailhead through forest, meadows and alpine terrain to the main summit. The trail MUST avoid water, keep a gentle grade (zigzagging up steep flanks, level at the tips of switchbacks), rarely cross itself, be level across and walkable as a surface of its own (built up with dry-stone walls where the slope falls away), and be well marked.
 
 #### Scenario: Trail connects trailhead and summit
 - **WHEN** any world is generated
@@ -82,6 +82,12 @@ Each world SHALL contain one hiking trail, an easy to see path that winds from a
 - **THEN** no point of the trail lies in a lake
 - **AND** the grade along the trail, measured over any 20 m of it, stays at or below 30 percent
 - **AND** across the trail the path is level, the terrain never rises above the path surface, and the player walks on the path surface
+
+#### Scenario: Never stuck on the trail
+- **WHEN** a walker follows the trail from the trailhead to the summit
+- **THEN** it is never stopped: bends, switchback tips and the coarse ground beside the path do not block it
+- **AND** where the path is built up, its edge keeps the walker on it
+- **AND** from beside the path the walker steps or climbs onto it wherever the edge is not higher than a climbable ledge
 
 #### Scenario: Cairns mark the trail
 - **WHEN** any world is generated
