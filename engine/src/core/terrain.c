@@ -598,10 +598,17 @@ int mtn_terrain_find_trail(mtn_terrain *t) {
         t->trail[t->trail_len++] = p;
     }
     free(raw);
-    /* cairns every 80 m beside the path, plus one on the summit */
+    /* a cairn at the trailhead, one every 80 m beside the path and one on the summit */
     free(t->cairns);
-    t->cairns = malloc(sizeof(vec3) * (size_t)(t->trail_len / 40 + 2));
+    t->cairns = malloc(sizeof(vec3) * (size_t)(t->trail_len / 40 + 3));
     t->cairn_count = 0;
+    if (t->trail_len > 2) {
+        vec3 a = t->trail[0], b = t->trail[2];
+        vec3 dir = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
+        vec3 c = v3_add(a, v3(-dir.z * 1.8f, 0, dir.x * 1.8f));
+        c.y = mtn_terrain_height(t, c.x, c.z);
+        t->cairns[t->cairn_count++] = c;
+    }
     for (int i = 40; i < t->trail_len - 1; i += 40) {
         vec3 a = t->trail[i - 1], b = t->trail[i + 1];
         vec3 dir = v3_norm(v3(b.x - a.x, 0, b.z - a.z));
@@ -749,6 +756,30 @@ int mtn_terrain_generate(mtn_terrain *t, const mtn_terrain_params *p) {
     int ok = mtn_terrain_find_trail(t);
     mtn_terrain_find_viewpoints(t);
     return ok;
+}
+
+static uint32_t fnv(uint32_t h, int32_t v) {
+    for (int i = 0; i < 4; i++) {
+        h ^= (uint32_t)((v >> (i * 8)) & 0xFF);
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static int32_t cm(float v) { return (int32_t)lroundf(v * 100.0f); }
+
+uint32_t mtn_terrain_checksum(const mtn_terrain *t) {
+    uint32_t h = 2166136261u;
+    size_t nn = (size_t)t->n * (size_t)t->n;
+    for (size_t i = 0; i < nn; i++) {
+        h = fnv(h, cm(t->h[i]));
+        h = fnv(h, t->water[i] == MTN_NO_WATER ? -1 : cm(t->water[i]));
+        h = fnv(h, t->biome[i]);
+    }
+    for (int i = 0; i < t->trail_len; i++) h = fnv(fnv(h, cm(t->trail[i].x)), cm(t->trail[i].z));
+    for (int i = 0; i < t->cairn_count; i++) h = fnv(fnv(h, cm(t->cairns[i].x)), cm(t->cairns[i].z));
+    for (int i = 0; i < t->vp_count; i++) h = fnv(fnv(h, cm(t->vps[i].pos.x)), cm(t->vps[i].yaw));
+    return h;
 }
 
 void mtn_terrain_free(mtn_terrain *t) {

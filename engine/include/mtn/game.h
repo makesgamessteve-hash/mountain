@@ -70,6 +70,7 @@ typedef struct mtn_game {
     mtn_gallery gallery;
     mtn_binding bindings[MTN_MAX_BINDINGS];
     int binding_count;
+    int clear_bindings;      /* scripts replace the default key map */
     int ui_modal;            /* menus open: no walking */
 
     int camera_mode;
@@ -114,6 +115,8 @@ void mtn_game_teleport_trailhead(mtn_game *g);
 float mtn_game_current_fov(const mtn_game *g);
 void mtn_game_refresh_rooms(mtn_game *g, int force);
 void mtn_game_play(mtn_game *g, const char *sound, float vol);
+/* plays a sound of something in the world: panned and attenuated from the listener */
+void mtn_game_play_at(mtn_game *g, const char *sound, vec3 pos, float vol);
 int mtn_game_load_sounds(mtn_game *g);
 float mtn_game_snowline(const mtn_game *g);
 

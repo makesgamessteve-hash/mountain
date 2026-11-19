@@ -81,10 +81,10 @@ cmake --build build && ./build/bin/mountain
 
 ### Windows
 
-With Visual Studio 2022 (or a MinGW cross compiler, see `cmake/mingw-w64-x86_64.cmake`):
+With Visual Studio 2022 or newer (or a MinGW cross compiler, see `cmake/mingw-w64-x86_64.cmake`):
 
 ```bash
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -A x64
 ```
 
 ```bash

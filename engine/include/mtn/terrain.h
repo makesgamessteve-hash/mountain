@@ -90,5 +90,7 @@ int mtn_terrain_fill_lakes(mtn_terrain *t);
 int mtn_terrain_find_trail(mtn_terrain *t);
 int mtn_terrain_find_viewpoints(mtn_terrain *t);
 float mtn_terrain_openness(const mtn_terrain *t, vec3 eye, float yaw, float range);
+/* FNV-1a over heights (1 cm), water, biomes, trail, cairns and viewpoints */
+uint32_t mtn_terrain_checksum(const mtn_terrain *t);
 
 #endif

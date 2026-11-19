@@ -124,6 +124,10 @@ static void default_keys(app *a) {
 }
 
 static void apply_bindings(app *a) {
+    if (a->g.clear_bindings) {
+        a->key_count = 0;
+        a->g.clear_bindings = 0;
+    }
     for (int i = 0; i < a->g.binding_count; i++) {
         SDL_Scancode sc = SDL_GetScancodeFromName(a->g.bindings[i].key);
         int act = mtn_action_from_name(a->g.bindings[i].action);
@@ -201,7 +205,7 @@ static void handle_requests(app *a) {
                 free(d);
             }
 #else
-            char msg[160];
+            char msg[600];
             snprintf(msg, sizeof msg, "Saved in %sphotos", g->user_dir);
             mtn_game_message(g, msg, 4.0f);
 #endif
@@ -230,7 +234,7 @@ static void handle_requests(app *a) {
 #endif
     }
     if (g->quit_request) a->running = 0;
-    if (g->binding_count) apply_bindings(a);
+    if (g->binding_count || g->clear_bindings) apply_bindings(a);
 }
 
 /* ------------------------------------------------------------------ events */

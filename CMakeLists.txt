@@ -95,7 +95,11 @@ if(MTN_BUILD_GAME)
       set(SDL_STATIC ON CACHE BOOL "" FORCE)
       FetchContent_Declare(SDL3 GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
                                 GIT_TAG ${MTN_SDL_TAG} GIT_SHALLOW TRUE)
+      # SDL needs GNU C extensions (EM_ASM on the web); keep ours strict
+      set(MTN_C_EXTENSIONS ${CMAKE_C_EXTENSIONS})
+      set(CMAKE_C_EXTENSIONS ON)
       FetchContent_MakeAvailable(SDL3)
+      set(CMAKE_C_EXTENSIONS ${MTN_C_EXTENSIONS})
     endif()
   endif()
 

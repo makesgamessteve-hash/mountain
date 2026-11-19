@@ -212,6 +212,10 @@ static int l_world_viewpoint(lua_State *L) {
     return 4;
 }
 static int l_world_summit(lua_State *L) { return push3(L, g_game->terrain.summit); }
+static int l_world_checksum(lua_State *L) {
+    lua_pushinteger(L, g_game->has_world ? (lua_Integer)mtn_terrain_checksum(&g_game->terrain) : 0);
+    return 1;
+}
 static int l_world_trailhead(lua_State *L) { return push3(L, g_game->terrain.trailhead); }
 static int l_world_info(lua_State *L) {
     mtn_terrain *t = &g_game->terrain;
@@ -343,6 +347,19 @@ static int l_weather_set(lua_State *L) {
     if (lua_toboolean(L, 3)) { /* instant */
         g_game->weather.current = g_game->weather.target;
         g_game->weather.blend = 0.0f;
+    }
+    return 0;
+}
+static int l_weather_table(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    for (int k = 0; k < MTN_SEASON_COUNT; k++) {
+        lua_getfield(L, 1, SEASONS[k]);
+        if (lua_istable(L, -1)) {
+            int t = lua_gettop(L);
+            for (int w = 0; w < MTN_WX_COUNT; w++)
+                g_game->weather.weights[k][w] = mtn_maxf(0.0f, fnum(L, t, mtn_weather_name((mtn_weather_kind)w), g_game->weather.weights[k][w]));
+        }
+        lua_pop(L, 1);
     }
     return 0;
 }
@@ -741,6 +758,13 @@ static int l_input_bind(lua_State *L) {
     return 0;
 }
 
+static int l_input_unbind_all(lua_State *L) {
+    (void)L;
+    g_game->clear_bindings = 1;
+    g_game->binding_count = 0;
+    return 0;
+}
+
 static int l_audio_play(lua_State *L) {
     int s = mtn_mixer_find(&g_game->mixer, luaL_checkstring(L, 1));
     lua_pushboolean(L, mtn_mixer_play(&g_game->mixer, s, (float)luaL_optnumber(L, 2, 1.0), (float)luaL_optnumber(L, 3, 0.0),
@@ -837,13 +861,13 @@ static void open_api(lua_State *L) {
     static const luaL_Reg world[] = {{"params", l_world_params}, {"generate", l_world_generate}, {"seed", l_world_seed},
         {"exists", l_world_exists}, {"height", l_world_height}, {"biome", l_world_biome}, {"summit", l_world_summit},
         {"trailhead", l_world_trailhead}, {"info", l_world_info}, {"altitude", l_world_altitude}, {"slope", l_world_slope},
-        {"water", l_world_water}, {"viewpoint", l_world_viewpoint}, {NULL, NULL}};
+        {"water", l_world_water}, {"viewpoint", l_world_viewpoint}, {"checksum", l_world_checksum}, {NULL, NULL}};
     static const luaL_Reg planet[] = {{"set", l_planet_set}, {"name", l_planet_name}, {NULL, NULL}};
     static const luaL_Reg tm[] = {{"hour", l_time_hour}, {"set_hour", l_time_set_hour}, {"day", l_time_day},
         {"speed", l_time_speed}, {"pause", l_time_pause}, {"season", l_time_season}, {"set_season", l_time_set_season},
         {"year", l_time_year}, {"daylight", l_time_daylight}, {"moon", l_time_moon}, {"day_length", l_time_day_length},
         {"sun", l_time_sun}, {NULL, NULL}};
-    static const luaL_Reg weather[] = {{"get", l_weather_get}, {"set", l_weather_set}, {"unlock", l_weather_unlock},
+    static const luaL_Reg weather[] = {{"get", l_weather_get}, {"set", l_weather_set}, {"unlock", l_weather_unlock}, {"table", l_weather_table},
         {"snow", l_weather_snow}, {NULL, NULL}};
     static const luaL_Reg flora[] = {{"species", l_flora_species}, {"clear", l_flora_clear}, {"count", l_flora_count}, {"near", l_flora_near}, {NULL, NULL}};
     static const luaL_Reg fauna[] = {{"species", l_fauna_species}, {"clear", l_fauna_clear}, {"count", l_fauna_count},
@@ -862,7 +886,7 @@ static void open_api(lua_State *L) {
     static const luaL_Reg ui[] = {{"size", l_ui_size}, {"text", l_ui_text}, {"text_width", l_ui_text_width}, {"rect", l_ui_rect},
         {"icon", l_ui_icon}, {"button", l_ui_button}, {"photo", l_ui_photo}, {"modal", l_ui_modal}, {"message", l_ui_message},
         {"pointer", l_ui_pointer}, {"error", l_ui_error}, {NULL, NULL}};
-    static const luaL_Reg input[] = {{"mode", l_input_mode}, {"down", l_input_down}, {"bind", l_input_bind}, {NULL, NULL}};
+    static const luaL_Reg input[] = {{"mode", l_input_mode}, {"down", l_input_down}, {"bind", l_input_bind}, {"unbind_all", l_input_unbind_all}, {NULL, NULL}};
     static const luaL_Reg audio[] = {{"play", l_audio_play}, {"ambient", l_audio_ambient}, {"loaded", l_audio_loaded}, {NULL, NULL}};
     static const luaL_Reg storage[] = {{"save", l_storage_save}, {"load", l_storage_load}, {NULL, NULL}};
     static const luaL_Reg os[] = {{"time", l_os_time}, {"clock", l_os_clock}, {"date", l_os_date}, {NULL, NULL}};

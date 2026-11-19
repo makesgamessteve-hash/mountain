@@ -70,6 +70,17 @@ void mtn_game_play(mtn_game *g, const char *sound, float vol) {
     if (s >= 0) mtn_mixer_play(&g->mixer, s, vol, 0.0f, 1.0f);
 }
 
+void mtn_game_play_at(mtn_game *g, const char *sound, vec3 pos, float vol) {
+    int s = mtn_mixer_find(&g->mixer, sound);
+    if (s < 0) return;
+    vec3 rel = v3_sub(pos, g->player.pos);
+    float d = v3_len(rel);
+    vec3 right = v3(cosf(g->player.yaw), 0, sinf(g->player.yaw));
+    float pan = d > 0.01f ? mtn_clampf(v3_dot(rel, right) / d, -1.0f, 1.0f) * 0.8f : 0.0f;
+    float att = vol / (1.0f + d / 20.0f);
+    mtn_mixer_play(&g->mixer, s, att, pan, 1.0f);
+}
+
 int mtn_game_load_sounds(mtn_game *g) {
     static const char *names[] = {"wind_loop", "rain_loop", "birds_loop", "crickets_loop", "stream_loop", "fire_loop",
                                   "step_grass_1", "step_grass_2", "step_rock_1", "step_rock_2", "step_snow_1",
@@ -176,7 +187,34 @@ static int world_push(void *ctx, vec3 *pos, float radius, float height) {
     (void)height;
     int hit = mtn_flora_collide(&g->flora, pos, radius);
     hit |= mtn_house_collide(&g->house, pos, radius);
+    for (int i = 0; i < g->terrain.cairn_count; i++) { /* cairns are solid */
+        vec3 c = g->terrain.cairns[i];
+        float d = v3_dist_xz(*pos, c), min_d = 0.55f + radius;
+        if (d < min_d && pos->y < c.y + 1.4f) {
+            vec3 dir = d > 1e-4f ? v3_scale(v3(pos->x - c.x, 0, pos->z - c.z), 1.0f / d) : v3(1, 0, 0);
+            pos->x = c.x + dir.x * min_d;
+            pos->z = c.z + dir.z * min_d;
+            hit = 1;
+        }
+    }
     return hit;
+}
+
+/* Near the edge of the playable area outward movement is slowed down
+ * progressively over the last 50 m, then clamped at the edge. */
+static void soft_boundary(mtn_game *g, vec3 prev) {
+    mtn_terrain *t = &g->terrain;
+    float r = t->p.playable_radius * t->world_size * 0.5f;
+    float d = v3_dist_xz(g->player.pos, t->center);
+    if (d > r - 50.0f && d > 1e-3f) {
+        vec3 out = v3_norm(v3(g->player.pos.x - t->center.x, 0, g->player.pos.z - t->center.z));
+        float outward = v3_dot(v3_sub(g->player.pos, prev), out);
+        if (outward > 0.0f) {
+            float keep = mtn_clampf((r - d) / 50.0f, 0.0f, 1.0f);
+            g->player.pos = v3_sub(g->player.pos, v3_scale(out, outward * (1.0f - keep)));
+        }
+    }
+    mtn_terrain_clamp_playable(t, &g->player.pos);
 }
 
 static int world_walkable(void *ctx, float x, float z) {
@@ -322,7 +360,12 @@ static void leave_house(mtn_game *g) {
 static void handle_weather_events(mtn_game *g) {
     mtn_weather_event ev;
     while ((ev = mtn_weather_pop_event(&g->weather)) != MTN_WX_EVENT_NONE)
-        if (ev == MTN_WX_EVENT_THUNDER) mtn_game_play(g, "thunder", g->interior ? 0.35f : 0.8f);
+        if (ev == MTN_WX_EVENT_THUNDER) {
+            /* thunder rolls in from a random direction */
+            float a = (float)(g->frame % 360) * MTN_DEG2RAD;
+            vec3 at = v3_add(g->player.pos, v3(cosf(a) * 15.0f, 0, sinf(a) * 15.0f));
+            mtn_game_play_at(g, "thunder", at, g->interior ? 0.6f : 1.4f);
+        }
 }
 
 static void footstep(mtn_game *g) {
@@ -394,7 +437,7 @@ void mtn_game_update(mtn_game *g, float dt) {
         vec3 prev = g->player.pos;
         mtn_player_update(&g->player, &mi, &col, dt);
         if (!g->interior) {
-            mtn_terrain_clamp_playable(&g->terrain, &g->player.pos);
+            soft_boundary(g, prev);
             if (mtn_house_crossed_in(&g->house, prev, g->player.pos)) enter_house(g);
         } else {
             if (g->player.pos.z < -0.25f && g->house.door_open) leave_house(g);

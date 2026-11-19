@@ -7,6 +7,8 @@ local rooms = require("content.rooms")
 local util = require("util")
 local hud = require("hud")
 local ambience = require("ambience")
+local controls = require("content.controls")
+local weather_data = require("content.weather")
 
 state = state or {
   menu = false, gallery = false, gallery_index = 1, help = 14, debug = false,
@@ -22,17 +24,32 @@ function save_settings()
   storage.save("settings", util.serialize(engine.settings()))
 end
 
+-- the current mountain and time speed are remembered between sessions
+function save_world()
+  storage.save("world", util.serialize{ seed = world.seed(), speed = time.speed() })
+end
+
+function new_world(seed)
+  local s = world.generate(seed)
+  time.set_hour(8)
+  if not engine.test_mode() then save_world() end
+  return s
+end
+
 function init(reloaded)
   load_settings()
   earth.planet()
   earth.flora()
   earth.fauna()
   rooms.define()
+  controls.apply()
+  weather_data.apply()
   if not world.exists() then
-    local seed = engine.test_mode() and 20261119 or nil
+    local saved = (not engine.test_mode()) and util.deserialize(storage.load("world")) or nil
+    local seed = engine.test_mode() and 20261119 or (saved and saved.seed)
     if engine.platform() == "web" then world.params{ size = 385, cell = 7.0, erosion_drops = 40000 } end
-    world.generate(seed)
-    time.set_hour(8.5)
+    new_world(seed)
+    if saved and saved.speed then time.speed(saved.speed) end
   end
   if engine.test_mode() then state.help = 0 end
   if reloaded then ui.message("Scripts reloaded", 2) end
@@ -62,9 +79,14 @@ local gallery_actions = {
   prev = function() state.gallery_index = math.max(1, state.gallery_index - 1) end,
   next = function() state.gallery_index = math.min(math.max(1, photos.count()), state.gallery_index + 1) end,
   delete = function()
-    if photos.count() > 0 then
+    if photos.count() == 0 then return end
+    if state.confirm_delete and state.confirm_delete > 0 then
       photos.delete(state.gallery_index)
       state.gallery_index = math.max(1, math.min(state.gallery_index, photos.count() - 1))
+      state.confirm_delete = 0
+    else
+      state.confirm_delete = 3
+      ui.message("Delete this photo? Press Delete again.", 3)
     end
   end,
   download = function() if photos.count() > 0 then photos.download(state.gallery_index) end end,
@@ -105,8 +127,8 @@ local global_actions = {
 function action(name, pressed)
   if not pressed then return end
   if name == "photo_saved" then
-    if engine.platform() == "web" then ui.message("Photo saved - open the gallery (G) to download it", 3)
-    else ui.message("Photo saved", 2) end
+    ui.message("Photo saved", 2)
+    state.recent_photo = 6   -- offer a download button for the new photo (web)
     return
   end
   if global_actions[name] then return global_actions[name]() end
@@ -121,6 +143,8 @@ end
 
 function update(dt)
   if state.help > 0 then state.help = state.help - dt end
+  if state.recent_photo and state.recent_photo > 0 then state.recent_photo = state.recent_photo - dt end
+  if state.confirm_delete and state.confirm_delete > 0 then state.confirm_delete = state.confirm_delete - dt end
   ambience.update(dt)
 end
 

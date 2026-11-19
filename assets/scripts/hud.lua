@@ -80,10 +80,11 @@ local function menu(state)
   ui.text(x + 150, y + 14, "seed " .. world.seed(), DIM)
   local by = y + 34
   local function row(label) ui.text(x + 10, by + 5, label, DIM) end
-  if ui.button("resume", x + 10, by, 136, 18, "Resume", 14) then state.menu = false; ui.modal(false) end
-  if ui.button("newworld", x + 154, by, 136, 18, "New mountain", 33) then
-    world.generate(); time.set_hour(8.5); state.menu = false; ui.modal(false)
+  if ui.button("resume", x + 10, by, 84, 18, "Resume", 14) then state.menu = false; ui.modal(false) end
+  if ui.button("newworld", x + 98, by, 122, 18, "New mountain", 33) then
+    new_world(); state.menu = false; ui.modal(false)
   end
+  if ui.button("seed", x + 224, by, 66, 18, "Seed", 25) then state.seed_entry = "" end
   by = by + 24
   row("Time")
   if ui.button("h-", x + 70, by, 24, 18, "-") then time.set_hour(time.hour() - 1) end
@@ -93,6 +94,7 @@ local function menu(state)
   for i, s in ipairs(speeds) do
     if ui.button("speed" .. i, x + 176 + (i - 1) * 29, by, 27, 18, s[1]) then
       if s[2] == 0 then time.pause(true) else time.pause(false); time.speed(s[2]) end
+      if not engine.test_mode() then save_world() end
     end
   end
   by = by + 22
@@ -129,6 +131,35 @@ local function menu(state)
   if engine.platform() ~= "web" and ui.button("quit", x + 190, by, 100, 18, "Quit", 22) then save_settings(); engine.quit() end
 end
 
+local function seed_entry(state)
+  local w, h = ui.size()
+  local pw, ph = 168, 150
+  local x, y = math.floor((w - pw) / 2), math.floor((h - ph) / 2)
+  panel(x, y, pw, ph)
+  ui.text(x + 8, y + 6, "Seed:", GOLD)
+  ui.rect(x + 52, y + 4, pw - 60, 12, {0, 0, 0, 0.5})
+  ui.text(x + 55, y + 6, state.seed_entry .. "_", WHITE)
+  local keys = {"7", "8", "9", "4", "5", "6", "1", "2", "3", "<", "0", "OK"}
+  for i, k in ipairs(keys) do
+    local col, row = (i - 1) % 3, math.floor((i - 1) / 3)
+    if ui.button("key" .. k, x + 8 + col * 52, y + 22 + row * 24, 48, 20, k) then
+      if k == "<" then
+        state.seed_entry = state.seed_entry:sub(1, -2)
+      elseif k == "OK" then
+        local n = tonumber(state.seed_entry)
+        if n and n >= 0 and n <= 4294967295 and math.floor(n) == n then
+          new_world(math.floor(n)); state.seed_entry = nil; state.menu = false; ui.modal(false)
+        else
+          ui.message("A seed is a whole number from 0 to 4294967295", 3)
+        end
+      elseif #state.seed_entry < 10 then
+        state.seed_entry = state.seed_entry .. k
+      end
+    end
+  end
+  if ui.button("seedcancel", x + 8, y + ph - 24, pw - 16, 18, "Cancel") then state.seed_entry = nil end
+end
+
 local function gallery(state)
   local w, h = ui.size()
   panel(8, 8, w - 16, h - 16)
@@ -159,9 +190,15 @@ local function gallery(state)
   if ui.button("gnext", 80, by, 60, 18, "Next", 17) then state.gallery_index = math.min(n, state.gallery_index + 1) end
   local dl = engine.platform() == "web" and "Download" or "Folder"
   if ui.button("gdl", 144, by, 92, 18, dl, 23) then photos.download(state.gallery_index) end
-  if ui.button("gdel", 240, by, 76, 18, "Delete", 39) then
-    photos.delete(state.gallery_index)
-    state.gallery_index = math.max(1, state.gallery_index - 1)
+  local sure = state.confirm_delete and state.confirm_delete > 0
+  if ui.button("gdel", 240, by, 76, 18, sure and "Sure?" or "Delete", 39) then
+    if sure then
+      photos.delete(state.gallery_index)
+      state.gallery_index = math.max(1, state.gallery_index - 1)
+      state.confirm_delete = 0
+    else
+      state.confirm_delete = 3
+    end
   end
   if engine.platform() ~= "web" then ui.text(324, by + 5, photos.dir(), DIM) end
 end
@@ -170,7 +207,8 @@ local function debug_overlay()
   local w = ui.size()
   local x, y, z = player.pos()
   local info = world.info()
-  ui.text(w - 210, 6, string.format("%3d fps  %s", math.floor(engine.fps()), engine.platform()), WHITE)
+  local fps = math.max(engine.fps(), 1)
+  ui.text(w - 210, 6, string.format("%3d fps %5.1f ms  %s", math.floor(fps), 1000 / fps, engine.platform()), WHITE)
   ui.text(w - 210, 18, string.format("%.0f %.0f %.0f", x, y, z), DIM)
   ui.text(w - 210, 30, string.format("plants %d  lakes %d", info.plants, info.lakes), DIM)
   ui.text(w - 210, 42, string.format("biome %s  %s", world.biome(x, z), player.surface()), DIM)
@@ -184,7 +222,13 @@ function hud.draw(state)
   prompts()
   help(state)
   if state.debug or engine.settings().show_fps then debug_overlay() end
-  if state.menu then menu(state) end
+  if state.menu then
+    if state.seed_entry then seed_entry(state) else menu(state) end
+  end
+  if engine.platform() == "web" and state.recent_photo and state.recent_photo > 0 and photos.count() > 0 and not state.menu then
+    local w = ui.size()
+    if ui.button("dlrecent", w - 132, 22, 124, 18, "Download photo", 23) then photos.download(1); state.recent_photo = 0 end
+  end
 end
 
 return hud

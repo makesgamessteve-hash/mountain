@@ -19,12 +19,14 @@ static void test_generate_deterministic(void) {
     CHECK(mtn_terrain_generate(&a, &p));
     CHECK(mtn_terrain_generate(&b, &p));
     CHECK(memcmp(a.h, b.h, sizeof(float) * 129 * 129) == 0);
+    CHECK(mtn_terrain_checksum(&a) == mtn_terrain_checksum(&b));
     CHECK(a.trail_len == b.trail_len);
     CHECK(a.vp_count == b.vp_count);
     p.seed = 99;
     mtn_terrain c;
     mtn_terrain_generate(&c, &p);
     CHECK(memcmp(a.h, c.h, sizeof(float) * 129 * 129) != 0);
+    CHECK(mtn_terrain_checksum(&a) != mtn_terrain_checksum(&c));
     mtn_terrain_free(&b);
     mtn_terrain_free(&c);
     mtn_terrain_free(&a);
@@ -76,7 +78,8 @@ static void test_trail_and_viewpoints(void) {
     CHECK(t.trail_len > 10);
     CHECK(v3_dist_xz(t.trail[0], t.trailhead) < 40.0f);
     CHECK(v3_dist_xz(t.trail[t.trail_len - 1], t.summit) < 40.0f);
-    CHECK(t.cairn_count >= 1);
+    CHECK(t.cairn_count >= 2);
+    CHECK(v3_dist_xz(t.cairns[0], t.trail[0]) < 5.0f); /* a cairn marks the trailhead */
     CHECK(mtn_terrain_trail_distance(&t, t.trail[t.trail_len / 2].x, t.trail[t.trail_len / 2].z) < 12.0f);
     CHECK(t.vp_count >= 2);
     CHECK_NEAR(t.vps[0].pos.x, t.summit.x, 1e-3);

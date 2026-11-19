@@ -34,6 +34,7 @@ test.screenshot("photo_gallery")
 tap("right"); tap("right"); tap("left")
 tap("x")           -- desktop: shows where photos are saved
 tap("delete")
+tap("delete")         -- confirm
 test.check(photos.count() == n0 + 4, "a photo was deleted")
 tap("g")
 test.check(not ui.modal(), "gallery closed")

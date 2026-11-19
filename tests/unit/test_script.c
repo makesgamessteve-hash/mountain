@@ -50,6 +50,10 @@ static void test_world_time_weather(void) {
                  "assert(planet.name() == 'Twin')\n"));
     CHECK(g->planet.moon_count == 2);
     CHECK_NEAR(g->planet.sun_color.x, 1.0f, 1e-6);
+    CHECK(run(g, "local c = world.checksum(); assert(c ~= 0 and c == world.checksum())\n"
+                 "weather.table{ winter = { snow = 9, storm = -1 }, monsoon = { rain = 1 } }\n"));
+    CHECK_NEAR(g->weather.weights[MTN_WINTER][MTN_WX_SNOW], 9.0f, 1e-6);
+    CHECK_NEAR(g->weather.weights[MTN_WINTER][MTN_WX_STORM], 0.0f, 1e-6);
     CHECK(run(g, "weather.set('rain', true, true); local n, w = weather.get(); assert(n == 'rain' and w.locked)\n"
                  "weather.unlock(); weather.snow(0.5); assert(select(2, weather.get()).snow_ground == 0.5)\n"
                  "weather.set('fog')\n"));
@@ -130,6 +134,9 @@ static void test_camera_photos_ui_audio(void) {
     mtn_input_pointer(&g->input, 10, 10, 0);
     mtn_ui_begin(&g->ui, 960, 540, &g->input);
     CHECK(run(g, "assert(ui.button('click', 0, 0, 40, 40, 'go') == true)"));
+    CHECK(g->clear_bindings == 1); /* scripts/content/controls.lua defines the whole key map */
+    CHECK(run(g, "input.unbind_all()"));
+    CHECK(g->binding_count == 0);
     CHECK(run(g, "assert(input.mode('touch') == 'touch'); assert(input.mode() == 'touch'); input.mode('keyboard')\n"
                  "assert(input.down('jump') == false); input.bind('jump', 'J')\n"
                  "assert(audio.play('chime', 0.5, -0.5, 1.2) == true); assert(audio.play('nothing') == false)\n"

@@ -38,10 +38,28 @@ click(x + 200, y + 188 + 9)         -- to the trailhead
 test.check(not ui.modal(), "trailhead closes the menu")
 tap("escape")
 local seed = world.seed()
-click(x + 160, y + 34 + 9)          -- new mountain
+click(x + 150, y + 34 + 9)          -- new mountain
 test.wait(0.5)
 test.check(world.seed() ~= seed, "a new mountain was generated")
+-- typed seed with the on-screen keypad
 tap("escape")
+click(x + 250, y + 34 + 9)          -- seed
+local kx, ky = math.floor((w - 168) / 2), math.floor((h - 150) / 2)
+local function key(col, row) click(kx + 8 + col * 52 + 20, ky + 22 + row * 24 + 10) end
+key(0, 3)                           -- "<" on an empty entry
+key(1, 3)                           -- "0" -> "0"
+key(0, 2); key(1, 2)                -- "1", "2" -> "012"
+key(0, 3)                           -- "<" -> "01"
+key(2, 0)                           -- "9" -> "019"
+key(2, 3)                           -- OK
+test.wait(0.5)
+test.check(world.seed() == 19, "seed 19 typed on the keypad, got " .. world.seed())
+tap("escape")
+click(x + 250, y + 34 + 9)          -- seed
+for i = 1, 11 do key(2, 0) end      -- 9999999999 (10 digits max), too large
+key(2, 3)                           -- OK -> hint, no new world
+test.check(world.seed() == 19, "an invalid seed is refused")
+click(kx + 80, ky + 150 - 15)       -- cancel
 click(x + 20, y + 34 + 9)           -- resume
 test.check(not ui.modal(), "resume closes the menu")
 test.finish(true)

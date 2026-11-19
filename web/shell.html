@@ -43,6 +43,15 @@
     if (Module._mtn_web_touch_hint) Module._mtn_web_touch_hint(1);
   }, { passive: true, once: true });
   window.addEventListener('error', function (e) { statusEl.textContent = 'Error: ' + e.message; });
+  (function () {
+    var test = document.createElement('canvas');
+    if (!test.getContext('webgl2')) {
+      document.querySelector('#bar').style.display = 'none';
+      statusEl.innerHTML = 'Mountain needs a browser with WebGL 2 (current Chrome, Edge, Firefox or Safari).<br>' +
+        'Please update your browser or enable hardware acceleration.';
+      window.mtnNoWebGL2 = true;
+    }
+  })();
 </script>
 {{{ SCRIPT }}}
 </body>

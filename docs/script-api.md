@@ -56,6 +56,7 @@ reload turn_left turn_right download`.
 | `world.trailhead()` | `x, y, z` where the hiking trail starts |
 | `world.viewpoint(i)` | `x, y, z, yaw` of scenic viewpoint `i` (1-based) or `nil` |
 | `world.altitude(h)` | height `h` as a fraction 0..1 of the terrain range |
+| `world.checksum()` | FNV-1a checksum of the generated world (heights, water, biomes, trail, cairns, viewpoints) |
 | `world.info()` | table: `size min_height max_height lakes trail_points cairns viewpoints plants snowline` |
 
 ## planet
@@ -87,6 +88,7 @@ reload turn_left turn_right download`.
 |---|---|
 | `weather.get()` | state name and a table `clouds precipitation snowing wind fog snow_ground temperature locked target` |
 | `weather.set(name[, lock[, instant]])` | `clear cloudy overcast fog rain storm snow`; locked by default |
+| `weather.table{...}` | season-weighted transition table: `{spring = {clear = 3, cloudy = 3, ...}, summer = {...}, autumn = {...}, winter = {...}}` |
 | `weather.unlock()` | let the weather change by itself again |
 | `weather.snow(amount)` | set the fresh snow cover 0..1 |
 
@@ -175,6 +177,7 @@ Coordinates are interface units (the window divided by an integer scale).
 |---|---|
 | `input.mode([name])` | `keyboard touch gamepad xr` |
 | `input.down(action)` | whether an action is held |
+| `input.unbind_all()` | remove all key bindings (scripts then define the whole key map) |
 | `input.bind(action, key)` | add a key (SDL key name, e.g. `"J"`) for an action |
 | `audio.play(name[, volume[, pan[, pitch]]])` | play `sounds/<name>.wav` |
 | `audio.ambient(name, volume[, fade])` | fade an ambient loop to a volume (0 stops it) |
