@@ -72,7 +72,7 @@ static int evaluate_site(const mtn_terrain *t, const mtn_flora *f, vec3 c, vec3 
         snprintf(s->reason, sizeof s->reason, "the edge of the world is too close");
         return 0;
     }
-    int tree = f ? mtn_flora_nearest_tree(f, c, 6.0f, 9.0f) : -1;
+    int tree = f ? mtn_flora_nearest_tree(f, c, 4.5f, 10.0f) : -1;
     if (tree >= 0) {
         const mtn_plant *p = &f->plants[tree];
         s->ok = 1;
@@ -566,7 +566,10 @@ void mtn_house_build_exterior(const mtn_house *h, const mtn_terrain *t, const mt
                         if (mtn_hash_unit(mtn_hash3i(x, y, z, 3)) < 0.6f) mtn_voxels_set(&vx, x, y, z, 3);
                         break;
                     }
-        mat4 rx = m4_mul(h->frame, m4_translate(v3(-5.5f, base + 0.6f, -hd - 3.6f)));
+        /* embed the rocks in the uphill ground behind the house */
+        vec3 back = m4_mul_point(h->frame, v3(0, 0, -hd - 1.5f));
+        float gy = mtn_terrain_height(t, back.x, back.z) - h->floor_y;
+        mat4 rx = m4_mul(h->frame, m4_translate(v3(-5.5f, mtn_minf(gy - 3.0f, h->wall_h - 2.0f), -hd - 3.2f)));
         mtn_voxels_mesh(&vx, solid, rx, NO_TEXTURE, MTN_VF_SNOW);
         mtn_voxels_free(&vx);
     }

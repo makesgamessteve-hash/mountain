@@ -191,6 +191,26 @@ static int push3(lua_State *L, vec3 v) {
     lua_pushnumber(L, v.z);
     return 3;
 }
+static int l_world_slope(lua_State *L) {
+    lua_pushnumber(L, mtn_terrain_slope(&g_game->terrain, (float)luaL_checknumber(L, 1), (float)luaL_checknumber(L, 2)));
+    return 1;
+}
+static int l_world_water(lua_State *L) {
+    float w = mtn_terrain_water(&g_game->terrain, (float)luaL_checknumber(L, 1), (float)luaL_checknumber(L, 2));
+    if (w == MTN_NO_WATER) return 0;
+    lua_pushnumber(L, w);
+    return 1;
+}
+static int l_world_viewpoint(lua_State *L) {
+    int i = (int)luaL_checkinteger(L, 1) - 1;
+    if (i < 0 || i >= g_game->terrain.vp_count) return 0;
+    const mtn_viewpoint *v = &g_game->terrain.vps[i];
+    lua_pushnumber(L, v->pos.x);
+    lua_pushnumber(L, v->pos.y - 1.7);
+    lua_pushnumber(L, v->pos.z);
+    lua_pushnumber(L, v->yaw);
+    return 4;
+}
 static int l_world_summit(lua_State *L) { return push3(L, g_game->terrain.summit); }
 static int l_world_trailhead(lua_State *L) { return push3(L, g_game->terrain.trailhead); }
 static int l_world_info(lua_State *L) {
@@ -385,6 +405,17 @@ static int l_flora_species(lua_State *L) {
     lua_pushinteger(L, idx);
     return 1;
 }
+static int l_flora_near(lua_State *L) {
+    vec3 c = v3((float)luaL_checknumber(L, 1), 0, (float)luaL_checknumber(L, 2));
+    float r = (float)luaL_checknumber(L, 3);
+    int n = 0;
+    for (int i = 0; i < g_game->flora.count; i++) {
+        const mtn_plant *p = &g_game->flora.plants[i];
+        if (!p->hidden && g_game->flora.species[p->species].kind != MTN_PLANT_GROUND && v3_dist_xz(p->pos, c) < r) n++;
+    }
+    lua_pushinteger(L, n);
+    return 1;
+}
 static int l_flora_clear(lua_State *L) { (void)L; mtn_flora_clear_species(&g_game->flora); return 0; }
 static int l_flora_count(lua_State *L) {
     lua_pushinteger(L, g_game->flora.count);
@@ -518,6 +549,16 @@ static int l_house_distance(lua_State *L) {
     lua_pushnumber(L, g_game->interior ? sqrtf(g_game->player.pos.x * g_game->player.pos.x + g_game->player.pos.z * g_game->player.pos.z)
                                        : mtn_house_door_distance(&g_game->house, g_game->player.pos));
     return 2;
+}
+static int l_house_door_pos(lua_State *L) {
+    if (!mtn_house_exists(&g_game->house)) return 0;
+    vec3 d = mtn_house_door_world(&g_game->house);
+    vec3 f = g_game->house.front;
+    lua_pushnumber(L, d.x);
+    lua_pushnumber(L, d.y);
+    lua_pushnumber(L, d.z);
+    lua_pushnumber(L, atan2f(-f.x, f.z)); /* yaw that looks at the door from outside */
+    return 4;
 }
 static int l_house_can_unsummon(lua_State *L) {
     lua_pushboolean(L, !g_game->interior && mtn_house_can_unsummon(&g_game->house, g_game->player.pos));
@@ -795,7 +836,8 @@ static void open_api(lua_State *L) {
         {"settings", l_engine_settings}, {"xr", l_engine_xr}, {NULL, NULL}};
     static const luaL_Reg world[] = {{"params", l_world_params}, {"generate", l_world_generate}, {"seed", l_world_seed},
         {"exists", l_world_exists}, {"height", l_world_height}, {"biome", l_world_biome}, {"summit", l_world_summit},
-        {"trailhead", l_world_trailhead}, {"info", l_world_info}, {"altitude", l_world_altitude}, {NULL, NULL}};
+        {"trailhead", l_world_trailhead}, {"info", l_world_info}, {"altitude", l_world_altitude}, {"slope", l_world_slope},
+        {"water", l_world_water}, {"viewpoint", l_world_viewpoint}, {NULL, NULL}};
     static const luaL_Reg planet[] = {{"set", l_planet_set}, {"name", l_planet_name}, {NULL, NULL}};
     static const luaL_Reg tm[] = {{"hour", l_time_hour}, {"set_hour", l_time_set_hour}, {"day", l_time_day},
         {"speed", l_time_speed}, {"pause", l_time_pause}, {"season", l_time_season}, {"set_season", l_time_set_season},
@@ -803,7 +845,7 @@ static void open_api(lua_State *L) {
         {"sun", l_time_sun}, {NULL, NULL}};
     static const luaL_Reg weather[] = {{"get", l_weather_get}, {"set", l_weather_set}, {"unlock", l_weather_unlock},
         {"snow", l_weather_snow}, {NULL, NULL}};
-    static const luaL_Reg flora[] = {{"species", l_flora_species}, {"clear", l_flora_clear}, {"count", l_flora_count}, {NULL, NULL}};
+    static const luaL_Reg flora[] = {{"species", l_flora_species}, {"clear", l_flora_clear}, {"count", l_flora_count}, {"near", l_flora_near}, {NULL, NULL}};
     static const luaL_Reg fauna[] = {{"species", l_fauna_species}, {"clear", l_fauna_clear}, {"count", l_fauna_count},
         {"spawn", l_fauna_spawn}, {NULL, NULL}};
     static const luaL_Reg player[] = {{"pos", l_player_pos}, {"set_pos", l_player_set_pos}, {"yaw", l_player_yaw},
@@ -811,7 +853,7 @@ static void open_api(lua_State *L) {
         {"altitude", l_player_altitude}, {"speeds", l_player_speeds}, {NULL, NULL}};
     static const luaL_Reg house[] = {{"summon", l_house_summon}, {"unsummon", l_house_unsummon}, {"exists", l_house_exists},
         {"state", l_house_state}, {"interact", l_house_interact}, {"door", l_house_door}, {"distance", l_house_distance},
-        {"can_unsummon", l_house_can_unsummon}, {"room", l_house_room}, {"clear_rooms", l_house_clear_rooms},
+        {"can_unsummon", l_house_can_unsummon}, {"door_pos", l_house_door_pos}, {"room", l_house_room}, {"clear_rooms", l_house_clear_rooms},
         {"define_room", l_house_define_room}, {NULL, NULL}};
     static const luaL_Reg camera[] = {{"mode", l_camera_mode}, {"fov", l_camera_fov}, {"filter", l_camera_filter},
         {"shoot", l_camera_shoot}, {NULL, NULL}};
@@ -955,7 +997,7 @@ void mtn_script_update(mtn_game *g, float dt) {
 }
 
 void mtn_script_ui(mtn_game *g) {
-    if (g->L) mtn_script_call(g, "ui", 0);
+    if (g->L) mtn_script_call(g, "draw", 0);
     if (g->script_error[0]) {
         /* scripts are broken: show the error instead of crashing */
         mtn_ui *ui = &g->ui;
