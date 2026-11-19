@@ -1,0 +1,110 @@
+-- Automated game test: every input path goes through real SDL events -
+-- keyboard, mouse, wheel, touch controls (stick, look, buttons) and a
+-- virtual gamepad. MIT License.
+local function tap(key)
+  test.key(key, true); test.frames(2); test.key(key, false); test.frames(2)
+end
+time.pause(true)
+time.set_hour(12)
+weather.set("clear", true, true)
+test.frames(5)
+
+-- keyboard walking and running
+local x0, _, z0 = player.pos()
+test.key("w", true); test.key("left shift", true)
+test.wait(1.0)
+test.key("w", false); test.key("left shift", false)
+test.frames(5)
+local x1, _, z1 = player.pos()
+test.check(math.abs(x1 - x0) + math.abs(z1 - z0) > 2, "W + Shift walks forward")
+for _, k in ipairs({"a", "d", "s", "up", "down", "left", "right"}) do test.key(k, true); test.frames(6); test.key(k, false) end
+tap("space")
+test.check(input.mode() == "keyboard", "keyboard mode")
+
+-- mouse look
+local yaw0 = player.yaw()
+test.mouse_move(120, -40)
+test.frames(3)
+test.check(math.abs(player.yaw() - yaw0) > 0.1, "mouse moves the view")
+test.mouse_button(true); test.frames(2); test.mouse_button(false); test.frames(2)
+test.wheel(1); test.frames(2); test.wheel(-1); test.frames(2)
+
+-- debug overlay, fullscreen, script reload
+tap("f3"); test.frames(3); tap("f3")
+tap("f11"); test.wait(0.3); tap("f11"); test.wait(0.3)
+tap("f5"); test.wait(0.2)
+test.check(ui.error() == nil, "scripts reloaded without errors")
+
+-- touch: the first touch switches to touch controls
+test.touch("down", 7, 0.5, 0.2); test.frames(2); test.touch("up", 7, 0.5, 0.2); test.frames(2)
+test.check(input.mode() == "touch", "touch switches to touch controls")
+test.screenshot("input_touch")
+-- virtual stick on the lower left
+x0, _, z0 = player.pos()
+test.touch("down", 1, 0.15, 0.8); test.frames(2)
+test.touch("move", 1, 0.15, 0.6); test.wait(1.0)
+test.touch("up", 1, 0.15, 0.6); test.frames(2)
+x1, _, z1 = player.pos()
+test.check(math.abs(x1 - x0) + math.abs(z1 - z0) > 1, "touch stick walks")
+-- look by dragging on the right
+yaw0 = player.yaw()
+test.touch("down", 2, 0.6, 0.4); test.frames(2)
+test.touch("move", 2, 0.75, 0.4); test.frames(2)
+test.touch("up", 2, 0.75, 0.4); test.frames(2)
+test.check(math.abs(player.yaw() - yaw0) > 0.05, "touch drag looks around")
+-- on-screen buttons
+local jx, jy = test.touch_button("jump")
+test.check(jx ~= nil, "jump button on screen")
+test.touch("down", 3, jx, jy); test.frames(2); test.touch("up", 3, jx, jy); test.frames(2)
+local cx, cy = test.touch_button("camera")
+test.touch("down", 4, cx, cy); test.frames(2); test.touch("up", 4, cx, cy); test.frames(4)
+test.check(camera.mode(), "touch camera button enters camera mode")
+local sx, sy = test.touch_button("shoot")
+test.check(sx ~= nil, "shutter button in camera mode")
+local ex, ey = test.touch_button("camera")
+test.touch("down", 5, ex, ey); test.frames(2); test.touch("up", 5, ex, ey); test.frames(4)
+test.check(not camera.mode(), "touch leaves camera mode")
+-- touch in a modal menu drives the UI pointer
+local mx, my = test.touch_button("menu")
+test.touch("down", 6, mx, my); test.frames(2); test.touch("up", 6, mx, my); test.frames(4)
+test.check(ui.modal(), "touch menu button opens the menu")
+test.touch("down", 8, 0.5, 0.5); test.frames(2); test.touch("up", 8, 0.5, 0.5); test.frames(2)
+tap("escape")
+ui.modal(false)
+
+-- gamepad
+test.check(test.gamepad(), "virtual gamepad attached")
+test.wait(0.2)
+test.gamepad_axis("leftx", 0.0)
+test.gamepad_axis("lefty", -1.0); test.wait(0.6); test.gamepad_axis("lefty", 0.0)
+test.check(input.mode() == "gamepad", "gamepad mode")
+yaw0 = player.yaw()
+test.gamepad_axis("rightx", 1.0); test.wait(0.3); test.gamepad_axis("rightx", 0.0)
+test.gamepad_axis("righty", 0.5); test.wait(0.1); test.gamepad_axis("righty", 0.0)
+test.check(math.abs(player.yaw() - yaw0) > 0.2, "right stick looks around")
+for _, b in ipairs({"a", "x", "leftstick", "leftstick", "dpup", "dpdown", "dpleft", "dpright", "leftshoulder"}) do
+  test.gamepad_button(b, true); test.frames(2); test.gamepad_button(b, false); test.frames(2)
+end
+test.gamepad_button("rightshoulder", true); test.frames(2); test.gamepad_button("rightshoulder", false); test.frames(3)
+test.check(camera.mode(), "RB enters camera mode")
+test.gamepad_axis("righttrigger", 1.0); test.frames(3); test.gamepad_axis("righttrigger", 0.0); test.frames(3)
+test.gamepad_button("b", true); test.frames(2); test.gamepad_button("b", false); test.frames(3)
+test.check(not camera.mode(), "B leaves camera mode")
+test.gamepad_button("y", true); test.frames(2); test.gamepad_button("y", false); test.wait(0.5)
+test.gamepad_button("start", true); test.frames(2); test.gamepad_button("start", false); test.frames(3)
+test.check(ui.modal(), "Start opens the menu")
+test.gamepad_button("b", true); test.frames(2); test.gamepad_button("b", false); test.frames(3)
+test.gamepad_button("back", true); test.frames(2); test.gamepad_button("back", false); test.frames(3)
+test.gamepad_button("back", true); test.frames(2); test.gamepad_button("back", false); test.frames(3)
+test.gamepad_detach()
+test.wait(0.2)
+test.render_view(true)
+test.frames(1)
+test.render_view(false)
+test.resize(800, 450)
+test.wait(0.2)
+local st = test.stats()
+test.check(st.draw_calls > 10 and st.width > 100, "renderer stats")
+local r, g, b = test.average_color()
+test.check(r + g + b > 0.1, "something visible on screen")
+test.finish(true)

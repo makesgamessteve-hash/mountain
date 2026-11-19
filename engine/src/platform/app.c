@@ -579,6 +579,15 @@ static int t_pixel(lua_State *L) {
     for (int c = 0; c < 3; c++) lua_pushnumber(L, acc[c] / (w * h * 255.0));
     return 3;
 }
+static int t_render_view(lua_State *L) {
+    /* renders the left half of the window through the stereo/XR view path */
+    mtn_game *g = &g_app->g;
+    float aspect = (float)(g_app->win_w / 2) / (float)(g_app->win_h > 0 ? g_app->win_h : 1);
+    mat4 proj = m4_perspective(70.0f * MTN_DEG2RAD, aspect, 0.08f, 5000.0f);
+    mtn_render_view(g_app->r, g, mtn_player_view(&g->player), proj, mtn_player_eye(&g->player), 0, 0, 0, g_app->win_w / 2,
+                    g_app->win_h, lua_toboolean(L, 1));
+    return 0;
+}
 static int t_data_dir(lua_State *L) { lua_pushstring(L, g_app->g.user_dir); return 1; }
 static int t_finish(lua_State *L) {
     test_state *t = &g_app->test;
@@ -592,7 +601,7 @@ static void test_register(app *a) {
         {"mouse_button", t_mouse_button}, {"wheel", t_wheel}, {"touch", t_touch}, {"gamepad", t_gamepad},
         {"gamepad_button", t_gamepad_button}, {"gamepad_axis", t_gamepad_axis}, {"gamepad_detach", t_gamepad_detach},
         {"check", t_check}, {"screenshot", t_screenshot}, {"resize", t_resize}, {"stats", t_stats},
-        {"touch_button", t_touch_layout}, {"average_color", t_pixel}, {"data_dir", t_data_dir}, {"finish", t_finish}, {NULL, NULL}};
+        {"touch_button", t_touch_layout}, {"average_color", t_pixel}, {"data_dir", t_data_dir}, {"render_view", t_render_view}, {"finish", t_finish}, {NULL, NULL}};
     lua_State *L = a->g.L;
     lua_newtable(L);
     luaL_setfuncs(L, fns, 0);
@@ -884,7 +893,7 @@ static int init(app *a, int argc, char **argv) {
     char err[1100];
     if (!mtn_render_load(a->r, err, sizeof err)) {
         fprintf(stderr, "renderer: %s\n", err);
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Mountain", err, a->win);
+        if (!a->g.test_mode) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Mountain", err, a->win);
         return 0;
     }
     int test_mode = a->g.test_mode;

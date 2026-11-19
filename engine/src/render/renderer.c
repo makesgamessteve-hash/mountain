@@ -1017,13 +1017,16 @@ static GLuint photo_texture(mtn_renderer *r, mtn_game *g, int index) {
     uint8_t *px = mtn_png_decode((const uint8_t *)data, size, &w, &h);
     free(data);
     if (!px) return 0;
-    int tw = 192, th = mtn_clampi(192 * h / (w > 0 ? w : 1), 1, 192);
+    /* photos are integer upscaled pixel art: shrink by an integer factor and keep it crisp */
+    int f = (w + 479) / 480;
+    if (f < 1) f = 1;
+    int tw = w / f, th = h / f;
     uint8_t *small = mtn_photo_downscale(px, w, h, tw, th);
     mtn_image_free(px);
     int slot = r->thumb_next;
     r->thumb_next = (r->thumb_next + 1) % MAX_THUMBS;
     if (r->thumbs[slot]) glDeleteTextures(1, &r->thumbs[slot]);
-    r->thumbs[slot] = make_texture(small, tw, th, 1);
+    r->thumbs[slot] = make_texture(small, tw, th, 0);
     snprintf(r->thumb_names[slot], sizeof r->thumb_names[slot], "%s", name);
     free(small);
     return r->thumbs[slot];

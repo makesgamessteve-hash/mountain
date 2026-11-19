@@ -1,0 +1,131 @@
+# Mountain - continuous integration: Linux (unit + headless game tests,
+# 95% coverage gate), Windows (MSVC), Web (Emscripten + browser smoke test,
+# published to the gh-pages branch from main) and OpenSpec validation.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (tests + coverage)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build cmake gcc \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxtst-dev \
+            libxkbcommon-dev libgl-dev libegl-dev libgles-dev libgl1-mesa-dri mesa-utils xvfb \
+            libasound2-dev libpulse-dev python3-pip
+          pip install --break-system-packages gcovr
+      - name: Build, run unit and game tests, check coverage (>= 95%)
+        run: tools/coverage.sh build/coverage 95
+      - name: Upload coverage report and game test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-coverage-and-screenshots
+          path: |
+            build/coverage/report/
+            build/coverage/bin/game-tests/*/screens/
+          if-no-files-found: ignore
+      - name: Release build
+        run: |
+          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DMTN_BUILD_TESTS=OFF
+          cmake --build build/release
+          mkdir -p dist/mountain-linux && cp -r build/release/bin/mountain build/release/bin/assets LICENSE README.md dist/mountain-linux/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mountain-linux-x64
+          path: dist/mountain-linux
+
+  windows:
+    name: Windows (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Unit tests
+        run: ctest --test-dir build -C Release -R unit --output-on-failure
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/mountain-windows
+          cp -r build/bin/mountain.exe build/bin/assets LICENSE README.md dist/mountain-windows/
+          cp build/bin/*.dll dist/mountain-windows/ 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mountain-windows-x64
+          path: dist/mountain-windows
+
+  web:
+    name: Web (Emscripten + WebXR)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install latest
+          "$HOME/emsdk/emsdk" activate latest
+      - name: Build
+        run: |
+          source "$HOME/emsdk/emsdk_env.sh"
+          emcmake cmake -S . -B build/web -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/web --parallel
+      - name: Browser smoke test (desktop, mobile touch, mocked WebXR)
+        run: |
+          npm install --no-save playwright@1
+          npx playwright install --with-deps chromium
+          node tests/web/smoke.cjs build/web/bin build/web-smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mountain-web
+          path: |
+            build/web/bin/mountain.*
+            build/web-smoke/
+      - name: Publish to gh-pages (web build only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p site
+          cp build/web/bin/mountain.js build/web/bin/mountain.wasm build/web/bin/mountain.data site/
+          cp build/web/bin/mountain.html site/index.html
+          touch site/.nojekyll
+          cd site
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Web build for playtesting (${GITHUB_SHA::7})"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+
+  openspec:
+    name: OpenSpec
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate specs and changes
+        run: npx -y @fission-ai/openspec@2.1.0 validate --all --strict --no-interactive

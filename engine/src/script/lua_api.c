@@ -969,10 +969,13 @@ int mtn_script_init(mtn_game *g) {
 }
 
 int mtn_script_reload(mtn_game *g) {
-    mtn_script_shutdown(g);
+    /* soft reload: keep the Lua state (and coroutines such as game tests),
+     * forget cached modules and run main.lua again */
     g_game = g;
     g->script_error[0] = 0;
-    g->L = new_state();
+    if (!g->L) g->L = new_state();
+    lua_newtable(g->L);
+    lua_setfield(g->L, LUA_REGISTRYINDEX, "mtn_loaded");
     if (!load_main(g)) return 0;
     lua_pushboolean(g->L, 1);
     return mtn_script_call(g, "init", 1);
