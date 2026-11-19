@@ -39,6 +39,7 @@ end
 function init(reloaded)
   load_settings()
   earth.planet()
+  earth.biomes()
   earth.flora()
   earth.fauna()
   rooms.define()

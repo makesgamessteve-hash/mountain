@@ -906,8 +906,16 @@ static int init(app *a, int argc, char **argv) {
         fprintf(stderr, "OpenGL 3.3 functions missing\n");
         return 0;
     }
-    a->r = mtn_render_create();
     char err[1100];
+    char probe[1024];
+    if (!mtn_vfs_resolve("scripts/main.lua", probe, sizeof probe)) {
+        snprintf(err, sizeof err, "Mountain cannot find its game files.\nExpected an 'assets' folder here:\n%sassets/",
+                 mtn_vfs_base());
+        fprintf(stderr, "%s\n", err);
+        if (!a->g.test_mode) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Mountain", err, a->win);
+        return 0;
+    }
+    a->r = mtn_render_create();
     if (!mtn_render_load(a->r, err, sizeof err)) {
         fprintf(stderr, "renderer: %s\n", err);
         if (!a->g.test_mode) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Mountain", err, a->win);

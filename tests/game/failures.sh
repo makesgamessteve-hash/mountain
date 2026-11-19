@@ -19,12 +19,16 @@ mkdir -p "$TMP/b/mods/shaders" && ln -s "$ASSETS" "$TMP/b/assets"
 printf 'uniform vec3 u_clash;\nvec4 helper(){ return vec4(u_clash, 1.0); }\n' > "$TMP/b/mods/shaders/post.vert"
 expect "unlinkable program" "$TMP/b"
 # 3. a missing shader file
-mkdir -p "$TMP/c/assets" && ln -s "$ASSETS/textures" "$TMP/c/assets/textures"
+mkdir -p "$TMP/c/assets" && ln -s "$ASSETS/textures" "$TMP/c/assets/textures" && ln -s "$ASSETS/scripts" "$TMP/c/assets/scripts"
 expect "missing shaders" "$TMP/c"
 # 4. a corrupt texture
 mkdir -p "$TMP/d/mods/textures" && ln -s "$ASSETS" "$TMP/d/assets" && echo "not a png" > "$TMP/d/mods/textures/terrain.png"
 expect "corrupt texture" "$TMP/d"
 # 5. a missing texture
-mkdir -p "$TMP/e/assets" && ln -s "$ASSETS/shaders" "$TMP/e/assets/shaders"
+mkdir -p "$TMP/e/assets" && ln -s "$ASSETS/shaders" "$TMP/e/assets/shaders" && ln -s "$ASSETS/scripts" "$TMP/e/assets/scripts"
 expect "missing textures" "$TMP/e"
+# 6. no assets folder at all: the error names the expected location
+mkdir -p "$TMP/f"
+code=$(run "$TMP/f")
+if [ "$code" = "2" ] && grep -q "$TMP/f/assets/" "$TMP/log"; then echo "ok   missing assets folder"; else echo "FAIL missing assets folder (exit $code)"; cat "$TMP/log"; fail=1; fi
 exit $fail

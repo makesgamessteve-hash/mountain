@@ -17,6 +17,11 @@ function earth.planet()
   }
 end
 
+-- biome thresholds as fractions of the terrain's height range
+function earth.biomes()
+  world.params{ tree_line = 0.48, snow_line = 0.80 }
+end
+
 function earth.flora()
   flora.clear()
   -- trees -------------------------------------------------------------

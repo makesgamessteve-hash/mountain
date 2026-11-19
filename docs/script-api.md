@@ -23,6 +23,42 @@ Input action names: `forward back left right run jump interact house camera
 shoot gallery menu zoom_in zoom_out filter prev next delete debug fullscreen
 reload turn_left turn_right download`.
 
+## Example: a small mod
+
+Save as `mods/scripts/content/earth.lua` (a copy of the original with
+changes) or, for a quick experiment, add to the end of `init` in
+`mods/scripts/main.lua`:
+
+```lua
+-- a second, reddish moon and a lavender field
+planet.set{ moons = {
+  { period = 8, phase = 0.45, size = 0.035, color = {0.95, 0.93, 0.88} },
+  { period = 3, phase = 0.10, size = 0.020, color = {1.0, 0.75, 0.65} },
+} }
+flora.species{ name = "lavender field", kind = "ground", tiles = {20}, bloom = {"summer"},
+  height_min = 0.3, height_max = 0.5, biomes = {"meadow"}, density = 2, patchiness = 0.9 }
+world.generate(world.seed())   -- plants are placed when the world is generated
+
+-- a room for the magic house
+house.define_room{ name = "reading nook", width = 6, height = 3.2, light = {1, 0.8, 0.6},
+  items = { {"armchair", x = 1.5, z = 4, rot = -90}, {"bookshelf", x = -2.75, z = 4.5, rot = 90},
+            {"lamp", x = 2.3, z = 5.5}, {"rug", x = 0, z = 4.5, arg = 3} } }
+
+-- greet the player when they reach the summit
+local greeted = false
+local old_update = update
+function update(dt)
+  old_update(dt)
+  local x, y, z = player.pos()
+  local sx, sy, sz = world.summit()
+  if not greeted and math.abs(x - sx) + math.abs(z - sz) < 15 then
+    greeted = true
+    ui.message("You reached the summit!", 5)
+    audio.play("chime")
+  end
+end
+```
+
 ## engine
 
 | Function | Description |
