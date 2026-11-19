@@ -99,8 +99,10 @@ static vec3 celestial_dir(float lat, float dec, float hour_angle) {
     return v3_norm(v3(x_e, z_u, -y_n));
 }
 
+/* The year starts with spring; equinoxes fall in the middle of spring and
+ * autumn and the solstices in the middle of summer and winter. */
 static float declination(const mtn_planet *p, float year_frac) {
-    return p->axial_tilt_deg * MTN_DEG2RAD * sinf(MTN_TAU * year_frac);
+    return p->axial_tilt_deg * MTN_DEG2RAD * sinf(MTN_TAU * (year_frac - 0.125f));
 }
 
 vec3 mtn_sun_direction(const mtn_planet *p, float year_frac, float hour) {
@@ -118,7 +120,7 @@ vec3 mtn_moon_direction(const mtn_planet *p, int i, double days, float year_frac
     float phase = mtn_moon_phase(p, i, days);
     float h = (hour - 12.0f) * (MTN_TAU / 24.0f) - phase * MTN_TAU;
     float incl = (i >= 0 && i < p->moon_count) ? p->moons[i].inclination : 0.0f;
-    float dec = p->axial_tilt_deg * MTN_DEG2RAD * sinf(MTN_TAU * (year_frac + phase)) +
+    float dec = p->axial_tilt_deg * MTN_DEG2RAD * sinf(MTN_TAU * (year_frac - 0.125f + phase)) +
                 incl * sinf(MTN_TAU * phase * 3.0f + (float)i);
     return celestial_dir(p->latitude_deg * MTN_DEG2RAD, dec, h);
 }

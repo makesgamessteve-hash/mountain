@@ -403,7 +403,59 @@ static void test_ui_button(void) {
     mtn_ui_free(&ui);
 }
 
+static void test_ui_focus_navigation(void) {
+    mtn_ui ui;
+    mtn_input in;
+    mtn_ui_init(&ui);
+    mtn_input_init(&in);
+    /* frame 1: navigation disabled, buttons are only counted */
+    mtn_ui_begin(&ui, 960, 540, &in);
+    CHECK(!mtn_ui_button(&ui, "a", 0, 0, 10, 10, "A", -1));
+    CHECK(!mtn_ui_button(&ui, "b", 0, 20, 10, 10, "B", -1));
+    CHECK(ui.buttons == 2);
+    /* frame 2: a menu is open, "down" shows the focus on the first button */
+    ui.nav_enabled = 1;
+    mtn_input_begin_frame(&in);
+    mtn_input_set(&in, MTN_ACT_BACK, 1);
+    mtn_ui_begin(&ui, 960, 540, &in);
+    CHECK(ui.focus_visible && ui.focus == 0);
+    mtn_ui_button(&ui, "a", 0, 0, 10, 10, "A", -1);
+    mtn_ui_button(&ui, "b", 0, 20, 10, 10, "B", -1);
+    /* frame 3: "down" again moves to the second; "up" twice wraps around */
+    mtn_input_begin_frame(&in);
+    mtn_input_set(&in, MTN_ACT_BACK, 0);
+    mtn_input_set(&in, MTN_ACT_BACK, 1);
+    mtn_ui_begin(&ui, 960, 540, &in);
+    CHECK(ui.focus == 1);
+    mtn_ui_button(&ui, "a", 0, 0, 10, 10, "A", -1);
+    mtn_ui_button(&ui, "b", 0, 20, 10, 10, "B", -1);
+    mtn_input_begin_frame(&in);
+    mtn_input_set(&in, MTN_ACT_BACK, 0);
+    mtn_input_set(&in, MTN_ACT_ZOOM_IN, 1);
+    mtn_ui_begin(&ui, 960, 540, &in);
+    CHECK(ui.focus == 0);
+    mtn_ui_button(&ui, "a", 0, 0, 10, 10, "A", -1);
+    mtn_ui_button(&ui, "b", 0, 20, 10, 10, "B", -1);
+    /* frame 4: A (jump) presses the focused button */
+    mtn_input_begin_frame(&in);
+    mtn_input_set(&in, MTN_ACT_ZOOM_IN, 0);
+    mtn_input_set(&in, MTN_ACT_JUMP, 1);
+    mtn_ui_begin(&ui, 960, 540, &in);
+    CHECK(mtn_ui_button(&ui, "a", 0, 0, 10, 10, "A", -1));
+    CHECK(!mtn_ui_button(&ui, "b", 0, 20, 10, 10, "B", -1));
+    /* a pointer press hides the keyboard focus again; closing the menu too */
+    mtn_input_begin_frame(&in);
+    mtn_input_pointer(&in, 500, 500, 1);
+    mtn_ui_begin(&ui, 960, 540, &in);
+    CHECK(!ui.focus_visible);
+    ui.nav_enabled = 0;
+    mtn_ui_begin(&ui, 960, 540, &in);
+    CHECK(!ui.focus_visible);
+    mtn_ui_free(&ui);
+}
+
 MTN_SUITE(input) {
+    TEST_RUN(test_ui_focus_navigation);
     TEST_RUN(test_actions);
     TEST_RUN(test_digital);
     TEST_RUN(test_move_and_pointer);

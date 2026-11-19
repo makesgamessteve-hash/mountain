@@ -102,7 +102,10 @@ static mtn_vertex make_vertex(vec3 p, vec3 n, vec2 uv, const mtn_material *mat) 
 void mtn_mesh_quad(mtn_mesh *m, mat4 xf, vec3 p0, vec3 p1, vec3 p2, vec3 p3, const mtn_material *mat, vec2 uv0,
                    vec2 uv1) {
     vec3 w0 = m4_mul_point(xf, p0), w1 = m4_mul_point(xf, p1), w2 = m4_mul_point(xf, p2), w3 = m4_mul_point(xf, p3);
-    vec3 n = v3_norm(v3_cross(v3_sub(w1, w0), v3_sub(w2, w0)));
+    vec3 n = v3_cross(v3_sub(w1, w0), v3_sub(w2, w0));
+    /* a collapsed corner (e.g. the pole of a rock) makes the first triangle degenerate: use the second */
+    if (v3_dot(n, n) < 1e-12f) n = v3_cross(v3_sub(w2, w0), v3_sub(w3, w0));
+    n = v3_norm(n);
     mtn_vertex a = make_vertex(w0, n, v2(uv0.x, uv1.y), mat);
     mtn_vertex b = make_vertex(w1, n, v2(uv1.x, uv1.y), mat);
     mtn_vertex c = make_vertex(w2, n, v2(uv1.x, uv0.y), mat);

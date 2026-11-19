@@ -64,6 +64,8 @@ typedef struct {
     float spawn_timer;
     int next_group;
     char call_events[4][24];
+    vec3 call_pos[4];
+    vec3 last_call_pos;     /* where the last popped call came from */
     int call_count;
 } mtn_fauna;
 
@@ -78,7 +80,7 @@ void mtn_fauna_update(mtn_fauna *f, const mtn_terrain *t, vec3 player, float hou
                       float precipitation, float dt);
 /* Build dynamic meshes for all visible animals near the camera. */
 void mtn_fauna_build(const mtn_fauna *f, vec3 cam, float max_dist, mtn_mesh *solid, mtn_mesh *sprites);
-/* Pops a species call sound name ("" if none). */
+/* Pops a species call sound name ("" if none); its position is then in last_call_pos. */
 const char *mtn_fauna_pop_call(mtn_fauna *f);
 
 #endif

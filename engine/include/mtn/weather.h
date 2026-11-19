@@ -26,7 +26,7 @@ typedef enum { MTN_WX_EVENT_NONE = 0, MTN_WX_EVENT_LIGHTNING, MTN_WX_EVENT_THUND
 typedef struct mtn_weather {
     mtn_weather_kind current, target;
     float blend;             /* 0..1 progress towards target */
-    float transition_s;      /* game seconds for a transition */
+    float transition_s;      /* real seconds for a transition */
     float time_left;         /* game seconds until the next change */
     float min_duration, max_duration;
     int locked;

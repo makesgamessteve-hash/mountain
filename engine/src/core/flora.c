@@ -230,6 +230,7 @@ int mtn_flora_ground_cell(const mtn_flora *f, const mtn_terrain *t, int cx, int 
             r -= suit[i];
         }
         const mtn_plant_species *s = &f->species[chosen];
+        memset(&out[n], 0, sizeof out[n]);
         out[n].pos = v3(x, mtn_terrain_height(t, x, z), z);
         out[n].size = mtn_lerpf(s->height_min, s->height_max, mtn_hash_unit(mtn_hash_u32(h + 3u)));
         out[n].species = (uint8_t)chosen;

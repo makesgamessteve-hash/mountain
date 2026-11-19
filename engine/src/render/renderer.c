@@ -621,6 +621,13 @@ static void update_ground(mtn_renderer *r, mtn_game *g, vec3 cam) {
             int n = mtn_flora_ground_cell(&g->flora, &g->terrain, c0x + dx, c0z + dz, items, 28);
             mtn_ground_build(&g->flora, items, n, &r->scratch_a);
         }
+    /* thin out towards the edge of the covered area so it has no visible border */
+    for (int i = 0; i < r->scratch_a.vcount; i++) {
+        mtn_vertex *v = &r->scratch_a.v[i];
+        float k = 1.0f - mtn_smoothstep(30.0f, 46.0f, v3_dist_xz(v3(v->x, 0, v->z), cam));
+        v->nx *= k;
+        v->ny *= k;
+    }
     gmesh_upload(&r->ground, &r->scratch_a, 1);
 }
 

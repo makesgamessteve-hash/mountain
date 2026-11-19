@@ -90,6 +90,12 @@ typedef struct {
     int down, pressed, released;
     uint32_t active;
     int consumed;    /* a widget used the pointer this frame */
+    /* keyboard / gamepad navigation of buttons (menus) */
+    int nav_enabled; /* set by the game while a menu is open */
+    int focus;       /* index of the focused button */
+    int focus_visible;
+    int buttons, last_buttons;
+    int activate;
 } mtn_ui;
 
 void mtn_ui_init(mtn_ui *ui);

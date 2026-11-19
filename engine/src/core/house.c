@@ -481,7 +481,11 @@ void mtn_house_build_exterior(const mtn_house *h, const mtn_terrain *t, const mt
     quad(&b, v3_add(eave_r0, dn), v3_add(eave_r1, dn), v3_add(ridge1, dn), v3_add(ridge0, dn), mtn_rgb(120, 90, 60), NO_TEXTURE, 0, v2(1, 1));
     /* moss on the roof in damp places */
     float moist = t ? mtn_terrain_moisture(t, h->origin.x, h->origin.z) : 0.5f;
-    if (moist > 0.4f) {
+    mtn_biome hb = t ? mtn_terrain_biome(t, h->origin.x, h->origin.z) : MTN_BIOME_FOREST;
+    int lichen = hb == MTN_BIOME_ALPINE || hb == MTN_BIOME_ROCK || hb == MTN_BIOME_SCREE || hb == MTN_BIOME_SNOW;
+    /* moss in damp forests, pale yellow-grey lichen up in the alpine and rocky places */
+    uint32_t growth = lichen ? mtn_rgb(215, 205, 150) : WHITE;
+    if (moist > 0.4f || lichen) {
         for (int i = 0; i < 6; i++) {
             float zz = mtn_rng_range(&r, -hd, hd), u = mtn_rng_range(&r, 0.15f, 0.8f);
             int side = i % 2;
@@ -490,8 +494,8 @@ void mtn_house_build_exterior(const mtn_house *h, const mtn_terrain *t, const mt
             vec3 nn = side ? v3(0.7f, 0.7f, 0) : v3(-0.7f, 0.7f, 0);
             p = v3_add(p, v3_scale(nn, 0.03f));
             vec3 ax = v3(0, 0, 0.6f), ay = side ? v3(-0.45f, 0.45f, 0) : v3(0.45f, 0.45f, 0);
-            if (!side) quad(&b, v3_sub(v3_sub(p, ax), ay), v3_sub(v3_add(p, ax), ay), v3_add(v3_add(p, ax), ay), v3_add(v3_sub(p, ax), ay), WHITE, 16, MTN_VF_SNOW, v2(1, 1));
-            else quad(&b, v3_sub(v3_add(p, ax), ay), v3_sub(v3_sub(p, ax), ay), v3_add(v3_sub(p, ax), ay), v3_add(v3_add(p, ax), ay), WHITE, 16, MTN_VF_SNOW, v2(1, 1));
+            if (!side) quad(&b, v3_sub(v3_sub(p, ax), ay), v3_sub(v3_add(p, ax), ay), v3_add(v3_add(p, ax), ay), v3_add(v3_sub(p, ax), ay), growth, 16, MTN_VF_SNOW, v2(1, 1));
+            else quad(&b, v3_sub(v3_add(p, ax), ay), v3_sub(v3_sub(p, ax), ay), v3_add(v3_sub(p, ax), ay), v3_add(v3_add(p, ax), ay), growth, 16, MTN_VF_SNOW, v2(1, 1));
         }
     }
     /* gables */

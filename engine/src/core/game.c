@@ -150,7 +150,7 @@ void mtn_game_new_world(mtn_game *g, uint32_t seed) {
 }
 
 float mtn_game_snowline(const mtn_game *g) {
-    static const float lines[MTN_SEASON_COUNT] = {0.66f, 0.80f, 0.74f, 0.40f};
+    static const float lines[MTN_SEASON_COUNT] = {0.66f, 0.82f, 0.74f, 0.36f};
     float base = 0.0f;
     for (int k = 0; k < MTN_SEASON_COUNT; k++) base += lines[k] * g->season.w[k];
     base += g->terrain.p.snow_line - 0.80f; /* scripts may move the summer snow line */
@@ -449,7 +449,7 @@ void mtn_game_update(mtn_game *g, float dt) {
             float precip = g->weather.precipitation;
             mtn_fauna_update(&g->fauna, &g->terrain, g->player.pos, hour, g->season, precip, dt);
             const char *call;
-            while ((call = mtn_fauna_pop_call(&g->fauna))[0]) mtn_game_play(g, call, 0.45f);
+            while ((call = mtn_fauna_pop_call(&g->fauna))[0]) mtn_game_play_at(g, call, g->fauna.last_call_pos, 0.9f);
         }
         float alt = g->interior ? mtn_terrain_altitude_frac(&g->terrain, g->house.floor_y)
                                 : mtn_terrain_altitude_frac(&g->terrain, g->player.pos.y);

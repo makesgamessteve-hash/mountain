@@ -74,10 +74,28 @@ void mtn_player_update(mtn_player *p, const mtn_move_input *in, const mtn_collid
     if (horiz > 1e-5f && p->on_ground) {
         float rise = gh_new - gh_old;
         if (rise > 0.0f && (n.y < p->max_slope || rise / horiz > 1.25f)) {
-            np.x = old.x;
-            np.z = old.z;
-            p->vel.x = p->vel.z = 0.0f;
+            /* too steep: drop the uphill part of the move and slide along the slope */
             p->blocked = 1;
+            vec3 up = v3_norm(v3(-n.x, 0, -n.z));
+            vec3 m = v3(np.x - old.x, 0, np.z - old.z);
+            float into = v3_dot(m, up);
+            vec3 along = into > 0.0f ? v3_sub(m, v3_scale(up, into)) : m;
+            vec3 sp = v3(old.x + along.x, np.y, old.z + along.z);
+            vec3 n2;
+            float gh_side = c->ground(c->ctx, sp.x, sp.z, &n2, &surf);
+            float side = v3_len(along);
+            if (side > 1e-4f && (gh_side - gh_old <= 0.0f || (n2.y >= p->max_slope && (gh_side - gh_old) / side <= 1.25f))) {
+                np = sp;
+                float vin = v3_dot(v3(p->vel.x, 0, p->vel.z), up);
+                if (vin > 0.0f) {
+                    p->vel.x -= up.x * vin;
+                    p->vel.z -= up.z * vin;
+                }
+            } else {
+                np.x = old.x;
+                np.z = old.z;
+                p->vel.x = p->vel.z = 0.0f;
+            }
         }
     }
     if (c->walkable && !c->walkable(c->ctx, np.x, np.z)) {

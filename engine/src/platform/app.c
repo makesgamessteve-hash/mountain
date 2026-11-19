@@ -67,6 +67,7 @@ typedef struct {
     float axes[SDL_GAMEPAD_AXIS_COUNT];
     int trigger_down;
     int run_toggle;
+    int stick_nav;
     int fixed_dt;
     int frame_limit;
     int exit_code;
@@ -376,6 +377,17 @@ static void gamepad_frame(app *a, float dt) {
     in->look_x += deadzone(a->axes[SDL_GAMEPAD_AXIS_RIGHTX]) * 2.6f * dt;
     in->look_y -= deadzone(a->axes[SDL_GAMEPAD_AXIS_RIGHTY]) * 2.0f * dt;
     in->analog_run = a->run_toggle;
+    /* in menus the left stick moves the selection like the D-pad */
+    int sy = a->axes[SDL_GAMEPAD_AXIS_LEFTY] < -0.6f ? -1 : (a->axes[SDL_GAMEPAD_AXIS_LEFTY] > 0.6f ? 1 : 0);
+    if (a->g.ui_modal && sy != a->stick_nav) {
+        if (sy < 0) mtn_input_set(in, MTN_ACT_ZOOM_IN, 1);
+        if (sy > 0) mtn_input_set(in, MTN_ACT_ZOOM_OUT, 1);
+        if (sy == 0) {
+            mtn_input_set(in, MTN_ACT_ZOOM_IN, 0);
+            mtn_input_set(in, MTN_ACT_ZOOM_OUT, 0);
+        }
+    }
+    a->stick_nav = sy;
     int trig = a->axes[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER] > 0.5f;
     if (trig != a->trigger_down) {
         a->trigger_down = trig;
@@ -690,6 +702,7 @@ static void frame(app *a, float dt) {
     if (g->test_mode) test_step(a);
     lock_audio(a);
     mtn_game_update(g, dt);
+    g->ui.nav_enabled = g->ui_modal;
     mtn_ui_begin(&g->ui, (float)a->win_w, (float)a->win_h, &g->input);
     mtn_script_ui(g);
     unlock_audio(a);

@@ -694,10 +694,12 @@ static void test_exterior_variants(void) {
     CHECK(memcmp(so2.v, so.v, sizeof(mtn_vertex) * (size_t)so.vcount) == 0);
     free3(&so2, &sp2, &gl2);
     free3(&so, &sp, &gl);
-    /* dry rocky ground: no moss, grey stone; snow: pale stone */
+    /* dry rocky ground: pale yellow-grey lichen instead of green moss, grey stone; snow: pale stone */
     fill_terrain(&t, 0.2f, MTN_BIOME_ROCK);
     build_ext(&h, &t, &so, &sp, &gl);
-    CHECK(count_tile(&so, 16) == 0);
+    CHECK(count_tile(&so, 16) > 0);
+    CHECK(has_color(&so, 16, 215, 205, 150));
+    CHECK(!has_color(&so, 16, 255, 255, 255));
     CHECK(has_color(&so, 5, 200, 196, 190));
     CHECK(!has_color(&so, 5, 235, 228, 215));
     free3(&so, &sp, &gl);

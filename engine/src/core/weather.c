@@ -38,7 +38,7 @@ void mtn_weather_init(mtn_weather *w, uint32_t seed) {
     memcpy(w->weights, weights, sizeof weights);
     mtn_rng_seed(&w->rng, seed, 77);
     w->current = w->target = MTN_WX_CLEAR;
-    w->transition_s = 45.0f * 60.0f; /* 45 game minutes */
+    w->transition_s = 45.0f; /* real seconds, whatever the time speed */
     w->min_duration = 2.0f * 3600.0f;
     w->max_duration = 8.0f * 3600.0f;
     w->time_left = mtn_rng_range(&w->rng, w->min_duration, w->max_duration);
@@ -115,7 +115,7 @@ void mtn_weather_update(mtn_weather *w, float dt_game, float dt_real, mtn_season
         }
     }
     if (w->target != w->current) {
-        w->blend += dt_game / w->transition_s;
+        w->blend += dt_real / w->transition_s;
         if (w->blend >= 1.0f) {
             w->current = w->target;
             w->blend = 0.0f;

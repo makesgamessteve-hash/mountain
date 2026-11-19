@@ -117,6 +117,7 @@ int mtn_fauna_spawn_group(mtn_fauna *f, const mtn_terrain *t, int si, vec3 at) {
         a->group = group;
         float spread = s->kind == MTN_ANIMAL_QUADRUPED ? 6.0f : 3.0f;
         a->pos = v3(at.x + mtn_rng_range(&f->rng, -spread, spread), 0, at.z + mtn_rng_range(&f->rng, -spread, spread));
+        if (s->kind == MTN_ANIMAL_QUADRUPED && !habitat_ok(s, t, a->pos.x, a->pos.z)) a->pos = v3(at.x, 0, at.z);
         a->home = at;
         a->home.y = base_height(s, &f->rng);
         a->pos.y = mtn_terrain_height(t, a->pos.x, a->pos.z) + a->home.y;
@@ -156,10 +157,11 @@ static void try_spawn(mtn_fauna *f, const mtn_terrain *t, vec3 player, float hou
     mtn_fauna_spawn_group(f, t, si, at);
 }
 
-static void push_call(mtn_fauna *f, const char *name) {
+static void push_call(mtn_fauna *f, const char *name, vec3 pos) {
     if (!name[0] || f->call_count >= 4) return;
     strncpy(f->call_events[f->call_count], name, 23);
     f->call_events[f->call_count][23] = 0;
+    f->call_pos[f->call_count] = pos;
     f->call_count++;
 }
 
@@ -167,7 +169,9 @@ const char *mtn_fauna_pop_call(mtn_fauna *f) {
     static char out[24];
     if (f->call_count == 0) return "";
     memcpy(out, f->call_events[0], sizeof out);
+    f->last_call_pos = f->call_pos[0];
     memmove(f->call_events[0], f->call_events[1], sizeof(f->call_events[0]) * 3);
+    memmove(&f->call_pos[0], &f->call_pos[1], sizeof(f->call_pos[0]) * 3);
     f->call_count--;
     return out;
 }
@@ -180,16 +184,19 @@ static void update_quadruped(mtn_fauna *f, const mtn_terrain *t, mtn_animal *a, 
     if (pd < s->comfort_dist && a->state != MTN_AS_FLEE) {
         a->state = MTN_AS_FLEE;
         a->timer = mtn_rng_range(&f->rng, 3.0f, 6.0f);
-        push_call(f, s->sound);
+        a->phase = 0.0f; /* quadrupeds use phase as the detour angle while moving away */
+        push_call(f, s->sound, a->pos);
     }
     if (a->state == MTN_AS_FLEE) {
-        vec3 away = v3_norm(v3(a->pos.x - player.x, 0, a->pos.z - player.z));
+        vec3 away = v3_rotate_y(v3_norm(v3(a->pos.x - player.x, 0, a->pos.z - player.z)), a->phase);
         a->vel = v3_scale(away, s->run_speed * 0.6f); /* a calm trot, never panicked */
         speed = s->run_speed * 0.6f;
         if (a->timer <= 0.0f && pd > s->comfort_dist * 1.6f) {
             a->state = MTN_AS_IDLE;
             a->timer = mtn_rng_range(&f->rng, 2.0f, 5.0f);
             a->home = a->pos;
+            a->vel = v3(0, 0, 0); /* settle: do not keep trotting while idle */
+            speed = 0.0f;
         }
     } else if (a->state == MTN_AS_WALK) {
         vec3 to = v3(a->home.x - a->pos.x, 0, a->home.z - a->pos.z);
@@ -217,7 +224,7 @@ static void update_quadruped(mtn_fauna *f, const mtn_terrain *t, mtn_animal *a, 
             a->timer = mtn_rng_range(&f->rng, 2.0f, 8.0f);
         }
         a->vel = v3(0, 0, 0);
-        if (mtn_rng_float(&f->rng) < 0.15f) push_call(f, s->sound);
+        if (mtn_rng_float(&f->rng) < 0.15f) push_call(f, s->sound, a->pos);
     }
     vec3 np = v3_add(a->pos, v3_scale(a->vel, dt));
     if (mtn_terrain_water(t, np.x, np.z) == MTN_NO_WATER && mtn_terrain_slope(t, np.x, np.z) < 0.6f) {
@@ -226,8 +233,10 @@ static void update_quadruped(mtn_fauna *f, const mtn_terrain *t, mtn_animal *a, 
     } else if (a->state != MTN_AS_FLEE) {
         a->state = MTN_AS_IDLE;
         a->timer = 1.0f;
+        a->vel = v3(0, 0, 0); /* stop, or it keeps bumping into the obstacle and never leaves idle */
+        speed = 0.0f;
     } else {
-        a->vel = v3_rotate_y(a->vel, 0.8f); /* turn along the obstacle */
+        a->phase += 0.8f; /* blocked: try a detour further around the obstacle next frame */
     }
     a->pos.y = mtn_terrain_height(t, a->pos.x, a->pos.z);
     if (speed > 0.01f) {

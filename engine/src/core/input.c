@@ -214,6 +214,24 @@ void mtn_ui_begin(mtn_ui *ui, float sw, float sh, const mtn_input *in) {
     ui->released = in->pointer_released;
     ui->consumed = 0;
     if (!ui->down && !ui->released) ui->active = 0;
+    /* up/down (W/S, arrows, D-pad, stick) move the focus, A/Space/Enter press the focused button */
+    ui->last_buttons = ui->buttons;
+    ui->buttons = 0;
+    ui->activate = 0;
+    if (!ui->nav_enabled) {
+        ui->focus_visible = 0;
+        return;
+    }
+    int nav = 0;
+    if (mtn_input_pressed(in, MTN_ACT_FORWARD) || mtn_input_pressed(in, MTN_ACT_ZOOM_IN)) nav = -1;
+    if (mtn_input_pressed(in, MTN_ACT_BACK) || mtn_input_pressed(in, MTN_ACT_ZOOM_OUT)) nav = 1;
+    if (nav && ui->last_buttons > 0) {
+        if (ui->focus_visible) ui->focus = (ui->focus + nav + ui->last_buttons) % ui->last_buttons;
+        else ui->focus = 0;
+        ui->focus_visible = 1;
+    }
+    if (ui->focus_visible && (mtn_input_pressed(in, MTN_ACT_JUMP) || mtn_input_pressed(in, MTN_ACT_SHOOT))) ui->activate = 1;
+    if (in->pointer_pressed) ui->focus_visible = 0;
 }
 
 void mtn_ui_image(mtn_ui *ui, float x, float y, float w, float h, int tex, float u0, float v0, float u1, float v1,
@@ -280,12 +298,19 @@ int mtn_ui_hover(const mtn_ui *ui, float x, float y, float w, float h) {
 
 int mtn_ui_button(mtn_ui *ui, const char *id, float x, float y, float w, float h, const char *label, int icon) {
     uint32_t hid = mtn_hash_str(id) | 1u;
+    int index = ui->buttons++;
+    int focused = ui->nav_enabled && ui->focus_visible && index == ui->focus;
     int hover = mtn_ui_hover(ui, x, y, w, h);
     if (hover && ui->pressed) ui->active = hid;
-    int clicked = hover && ui->released && ui->active == hid;
+    int clicked = (hover && ui->released && ui->active == hid) || (focused && ui->activate);
     if (hover && (ui->pressed || ui->released || ui->down)) ui->consumed = 1;
-    uint32_t bg = (ui->active == hid && ui->down) ? 0xE0406890u : (hover ? 0xD0385070u : 0xB0283850u);
+    uint32_t bg = (ui->active == hid && ui->down) ? 0xE0406890u : ((hover || focused) ? 0xD0385070u : 0xB0283850u);
     mtn_ui_rect(ui, x, y, w, h, bg);
+    if (focused) {
+        mtn_ui_rect(ui, x, y, w, 1, 0xFF70D0F0u);
+        mtn_ui_rect(ui, x, y, 1, h, 0xFF70D0F0u);
+        mtn_ui_rect(ui, x + w - 1, y, 1, h, 0xFF70D0F0u);
+    }
     mtn_ui_rect(ui, x, y + h - 1, w, 1, 0x60FFFFFFu);
     float tx = x + 4;
     if (icon >= 0) {
